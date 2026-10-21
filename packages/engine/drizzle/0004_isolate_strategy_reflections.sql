@@ -1,0 +1,1 @@
+ALTER TABLE `reflections` ADD `context_key` text DEFAULT 'legacy' NOT NULL;

@@ -1,0 +1,52 @@
+{
+  "name": "trex",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "description": "Trex is a modular crypto trading engine for Wallex market data and spot trading.",
+  "bin": {
+    "trex": "./apps/cli/bin/trex.js"
+  },
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "scripts": {
+    "dev": "bun run --no-env-file --watch apps/cli/src/main.ts",
+    "dev:dashboard": "bun run --no-env-file --cwd apps/dashboard dev",
+    "start": "bun run --no-env-file apps/cli/src/main.ts",
+    "trex": "bun run --no-env-file apps/cli/src/main.ts",
+    "ui": "bun run --no-env-file apps/cli/src/main.ts ui",
+    "build": "bun run --no-env-file --cwd apps/dashboard build",
+    "typecheck": "tsc --noEmit && bun run --no-env-file --cwd apps/dashboard typecheck",
+    "test": "bun --no-env-file test",
+    "db:generate": "bun run --no-env-file drizzle-kit generate --config packages/engine/drizzle.config.ts",
+    "db:migrate": "bun run --no-env-file apps/cli/src/main.ts db:migrate"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.85",
+    "@ai-sdk/google": "^4.0.102",
+    "@ai-sdk/openai": "^4.0.99",
+    "@ai-sdk/openai-compatible": "^3.0.75",
+    "ai": "^7.0.148",
+    "centrifuge": "^5.8.0",
+    "commander": "^15.0.0",
+    "decimal.js": "^10.6.0",
+    "dotenv": "^17.2.3",
+    "drizzle-orm": "^0.45.4",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.22",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "@esbuild-kit/core-utils": {
+      "esbuild": "^0.25.12"
+    }
+  }
+}
