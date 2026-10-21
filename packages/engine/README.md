@@ -350,7 +350,7 @@ The SQLite schema and migrations are under drizzle/ and src/adapters/persistence
 
 A run config snapshot records the settings needed to understand the run while omitting secret values and sensitive provider URLs/headers. Keep a backup of SQLite with the project revision and dependency lockfile when preserving a reproducible audit package. Backtest candles and benchmark candles are persisted so a resumed replay does not silently fetch a different dataset.
 
-Profile secrets are encrypted with AES-256-GCM. The encryption key must be supplied outside SQLite by the process environment or a secret manager. Without the correct key, secret access must fail closed.
+All runtime settings come from the active SQLite profile, with one-command CLI overrides and built-in defaults as the other configuration layers. Provider and exchange credentials are encrypted with AES-256-GCM before persistence. The encryption master key must be supplied outside SQLite by the OS/service secret manager; it cannot be stored in the database it protects. The database URL is also bootstrap-only because it is needed to locate the profile database. General process environment variables and dotenv files are not runtime configuration sources. Without the correct external encryption key, secret access fails closed.
 
 ## Provider and exchange adapters
 

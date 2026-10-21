@@ -26,6 +26,8 @@ export const MarketSpecSchema = z.object({
   symbol: z.string().regex(/^[A-Z0-9_-]+$/),
   baseAsset: z.string(),
   quoteAsset: z.string(),
+  baseAssetIconUrl: z.string().url().optional(),
+  quoteAssetIconUrl: z.string().url().optional(),
   pricePrecision: z.number().int().nonnegative(),
   quantityPrecision: z.number().int().nonnegative(),
   minQuantity: z.string().default("0"),

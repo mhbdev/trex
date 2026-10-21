@@ -21,6 +21,13 @@ const object = (value: unknown): JsonObject => value !== null && typeof value ==
 const unwrapResult = (body: unknown): unknown => object(body).result ?? body;
 const asString = (value: unknown, fallback = ""): string => value === null || value === undefined ? fallback : String(value);
 const asBoolean = (value: unknown): boolean => value === true || value === 1 || value === "true";
+const wallexIconUrl = (...values: unknown[]): string | undefined => {
+  for (const value of values) {
+    if (typeof value !== "string" || !value.startsWith("https://")) continue;
+    try { return new URL(value).toString(); } catch { /* Ignore absent or malformed optional icon metadata. */ }
+  }
+  return undefined;
+};
 const timeMs = (value: unknown, fallback: number): number => {
   if (typeof value === "number") return value < 10_000_000_000 ? value * 1000 : value;
   const parsed = Date.parse(String(value ?? ""));
@@ -94,10 +101,14 @@ export class WallexMarketDataAdapter implements MarketDataPort {
   async listSpotMarkets(): Promise<MarketSpec[]> {
     return (await this.marketRows()).map((value) => {
       const symbol = asString(value.symbol).toUpperCase();
+      const baseAssetIconUrl = wallexIconUrl(value.base_asset_icon, value.base_asset_png_icon, value.base_asset_svg_icon, value.base_icon);
+      const quoteAssetIconUrl = wallexIconUrl(value.quote_asset_icon, value.quote_asset_png_icon, value.quote_asset_svg_icon, value.quote_icon);
       return MarketSpecSchema.parse({
         symbol,
         baseAsset: asString(value.base_asset),
         quoteAsset: asString(value.quote_asset),
+        ...(baseAssetIconUrl ? { baseAssetIconUrl } : {}),
+        ...(quoteAssetIconUrl ? { quoteAssetIconUrl } : {}),
         pricePrecision: Number(value.price_precision ?? 8),
         quantityPrecision: Number(value.amount_precision ?? 8),
         minQuantity: asString(value.min_qty, "0"),

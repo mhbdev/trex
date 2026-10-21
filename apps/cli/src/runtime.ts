@@ -4,21 +4,40 @@ import { ConfiguredJsonResearchProvider, HybridResearchAggregator } from "@trex/
 import { TradingWorkflow } from "@trex/engine/application/trading-workflow";
 import { QuoteFailoverMarketData } from "@trex/engine/adapters/providers/quote-failover";
 import { WallexMarketDataAdapter, WallexOrderExecutionAdapter } from "@trex/engine/adapters/wallex/rest";
-import { loadConfig, validateModeConfig, type EngineConfig } from "@trex/engine/domain/config";
+import { defaultDatabaseUrl, loadConfig, validateModeConfig, type EngineConfig } from "@trex/engine/domain/config";
 import { ConfigurationProfileService } from "@trex/engine/application/configuration-profiles";
+import type { EngineEnvironmentKey } from "@trex/engine/domain/config";
+
+let invocationOverrides: Partial<Record<EngineEnvironmentKey, string>> = {};
+let invocationDatabaseUrl: string | undefined;
+
+export function setInvocationConfiguration(overrides: Partial<Record<EngineEnvironmentKey, string>>, databaseUrl?: string): void {
+  invocationOverrides = { ...overrides };
+  invocationDatabaseUrl = databaseUrl?.trim() || undefined;
+}
+
+export function getInvocationConfiguration(): Partial<Record<EngineEnvironmentKey, string>> {
+  return { ...invocationOverrides };
+}
+
+export function getDatabaseUrl(): string {
+  return invocationDatabaseUrl ?? defaultDatabaseUrl();
+}
 
 export function createProfileContext() {
-  const bootstrap = loadConfig(process.env);
-  const repository = new SqliteRunRepository(bootstrap.databaseUrl);
+  const databaseUrl = getDatabaseUrl();
+  const repository = new SqliteRunRepository(databaseUrl);
   repository.migrate();
-  const profiles = new ConfigurationProfileService(repository);
+  const profiles = new ConfigurationProfileService(repository, Date.now, () => ({}), undefined, databaseUrl);
   profiles.list();
   return { repository, profiles };
 }
 
 export function loadEffectiveConfig(profileId?: string): EngineConfig {
   const context = createProfileContext();
-  try { return context.profiles.effectiveConfig(profileId); }
+  try {
+    return loadConfig({ ...context.profiles.resolve(profileId), ...invocationOverrides, DATABASE_URL: getDatabaseUrl() });
+  }
   finally { context.repository.close(); }
 }
 

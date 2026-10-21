@@ -2,18 +2,17 @@ import { describe, expect, test } from "bun:test";
 import { parse as parseDotenv } from "dotenv";
 import { loadConfig } from "../packages/engine/src/domain/config.ts";
 import { applyConfigOptions, hasConfigOverride } from "../apps/cli/src/configuration.ts";
-import { publicConfig } from "../apps/cli/src/runtime.ts";
+import { getInvocationConfiguration, publicConfig } from "../apps/cli/src/runtime.ts";
 
 describe("CLI configuration", () => {
   test("applies command options after generic overrides and validates the resulting configuration", () => {
-    const env: NodeJS.ProcessEnv = {};
     applyConfigOptions({
       set: ["WALLEX_ALLOWED_MARKETS=BTCUSDT,ETHUSDT", "WALLEX_ENABLE_LIVE_TRADING=false"],
       aiProvider: "compatible", aiModel: "local-model", aiApiKey: "local-secret",
       aiBaseUrl: "http://localhost:1234/v1", liveTrading: "true", paperInitialCash: "25000", liveMaxGrossExposure: "100000",
       maxDebateRounds: "2", maxRiskDiscussRounds: "3", memoryHoldingPeriodBars: "90", memoryBenchmarkSymbol: "BTC/TMN",
-    }, env);
-    const config = loadConfig(env);
+    });
+    const config = loadConfig(getInvocationConfiguration());
     expect(config.ai.provider).toBe("compatible");
     expect(config.ai.model).toBe("local-model");
     expect(config.ai.apiKey).toBe("local-secret");
@@ -28,8 +27,8 @@ describe("CLI configuration", () => {
   });
 
   test("rejects unsupported --set keys and malformed assignments", () => {
-    expect(() => applyConfigOptions({ set: ["NOT_A_SETTING=x"] }, {})).toThrow("Unknown configuration key");
-    expect(() => applyConfigOptions({ set: ["missing-equals"] }, {})).toThrow("expected KEY=VALUE");
+    expect(() => applyConfigOptions({ set: ["NOT_A_SETTING=x"] })).toThrow("Unknown configuration key");
+    expect(() => applyConfigOptions({ set: ["missing-equals"] })).toThrow("expected KEY=VALUE");
   });
 
   test("detects explicit safety-flag overrides so prompts cannot reverse a CLI opt-out", () => {

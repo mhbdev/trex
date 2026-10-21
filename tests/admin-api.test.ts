@@ -8,7 +8,7 @@ describe("loopback admin API", () => {
   });
 
   test("serves profiles behind the per-session token and validates live confirmation", async () => {
-    const instance = await startAdminServer({ port: 0, environment: { DATABASE_URL: ":memory:", AI_API_KEY: "private-admin-test-key" } });
+    const instance = await startAdminServer({ port: 0, databaseUrl: ":memory:", environment: { AI_API_KEY: "private-admin-test-key" } });
     servers.push(instance);
     const origin = instance.address;
     const sessionResponse = await fetch(`${origin}/api/session`);

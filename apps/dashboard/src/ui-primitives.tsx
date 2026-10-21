@@ -1,7 +1,7 @@
 import * as SelectPrimitive from "@radix-ui/react-select";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { Check, ChevronDown, CircleHelp } from "lucide-react";
-import { type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 export type SelectOption = {
   value: string;
@@ -161,12 +161,20 @@ function splitMarketSymbol(symbol: string, quoteCurrency?: string): [string, str
   return quote ? [normalized.slice(0, -quote.length), quote] : [normalized, quoteCurrency?.toUpperCase() ?? "?"];
 }
 
-export function CurrencyPairAvatar({ symbol, quoteCurrency }: { symbol: string; quoteCurrency?: string }) {
+function CurrencyAvatar({ asset, iconUrl, side }: { asset: string; iconUrl?: string; side: "base" | "quote" }) {
+  const [failed, setFailed] = useState(false);
+  const safeIconUrl = iconUrl?.startsWith("https://") ? iconUrl : undefined;
+  return <span className={`currency-avatar currency-${side} currency-${asset.toLowerCase().replace(/[^a-z0-9]/g, "")}`} title={asset}>
+    {safeIconUrl && !failed ? <img src={safeIconUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} /> : currencyMark(asset)}
+  </span>;
+}
+
+export function CurrencyPairAvatar({ symbol, quoteCurrency, assetIcons = {} }: { symbol: string; quoteCurrency?: string; assetIcons?: Record<string, string> }) {
   const [base, quote] = splitMarketSymbol(symbol, quoteCurrency);
   return (
     <span className="currency-stack" role="img" aria-label={`${base} base currency and ${quote} quote currency`}>
-      <span className={`currency-avatar currency-base currency-${base.toLowerCase().replace(/[^a-z0-9]/g, "")}`} title={base}>{currencyMark(base)}</span>
-      <span className={`currency-avatar currency-quote currency-${quote.toLowerCase().replace(/[^a-z0-9]/g, "")}`} title={quote}>{currencyMark(quote)}</span>
+      <CurrencyAvatar asset={base} iconUrl={assetIcons[base]} side="base" />
+      <CurrencyAvatar asset={quote} iconUrl={assetIcons[quote]} side="quote" />
     </span>
   );
 }

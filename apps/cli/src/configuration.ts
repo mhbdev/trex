@@ -2,7 +2,7 @@ import { createInterface } from "node:readline/promises";
 import type { Command } from "commander";
 import { engineEnvironmentKeys, loadConfig, validateModeConfig, type EngineEnvironmentKey } from "@trex/engine/domain/config";
 import type { EngineMode } from "@trex/engine/domain/types";
-import { createProfileContext, loadEffectiveConfig } from "./runtime.ts";
+import { createProfileContext, getInvocationConfiguration, loadEffectiveConfig, setInvocationConfiguration } from "./runtime.ts";
 
 const allowedKeys = new Set<string>(engineEnvironmentKeys);
 
@@ -32,7 +32,6 @@ const optionEnvironmentKeys: Record<string, EngineEnvironmentKey> = {
   memoryHoldingPeriodBars: "MEMORY_HOLDING_PERIOD_BARS",
   memoryBenchmarkSymbol: "MEMORY_BENCHMARK_SYMBOL",
   paperInitialCash: "PAPER_INITIAL_CASH",
-  databaseUrl: "DATABASE_URL",
   riskKillSwitch: "RISK_KILL_SWITCH",
 };
 
@@ -64,12 +63,11 @@ export function addConfigOptions(command: Command): Command {
     .option("--memory-holding-period-bars <bars>", "Completed one-minute bars before scoring a decision (default 7200 = 5 days)")
     .option("--memory-benchmark-symbol <pair>", "Wallex benchmark pair (defaults to BTC in the same quote asset)")
     .option("--paper-initial-cash <amount>", "virtual portfolio starting cash")
-    .option("--database-url <url>", "SQLite database URL")
     .option("--risk-kill-switch <enabled>", "set the risk kill switch to true or false")
     .option("--no-prompt", "fail with setup instructions instead of prompting for missing configuration");
 }
 
-export function applyConfigOptions(options: Record<string, unknown>, env: NodeJS.ProcessEnv = process.env): void {
+export function applyConfigOptions(options: Record<string, unknown>): void {
   const changes = new Map<EngineEnvironmentKey, string>();
   for (const assignment of (options.set as string[] | undefined) ?? []) {
     const separator = assignment.indexOf("=");
@@ -82,8 +80,7 @@ export function applyConfigOptions(options: Record<string, unknown>, env: NodeJS
     const value = options[optionName];
     if (typeof value === "string") changes.set(key, value);
   }
-  for (const [key, value] of changes) env[key] = value;
-  if (changes.size > 0) loadConfig(env);
+  setInvocationConfiguration(Object.fromEntries(changes) as Partial<Record<EngineEnvironmentKey, string>>, typeof options.databaseUrl === "string" ? options.databaseUrl : undefined);
 }
 
 export function hasConfigOverride(options: Record<string, unknown>, key: EngineEnvironmentKey): boolean {
@@ -100,7 +97,7 @@ function promptText(label: string, fallback = ""): Promise<string> {
 export function promptSecret(label: string): Promise<string> {
   const input = process.stdin;
   if (!input.isTTY || typeof input.setRawMode !== "function") {
-    return Promise.reject(new Error("Secret prompts require an interactive terminal. Set the key with `trex config set KEY` or pass it through the environment."));
+    return Promise.reject(new Error("Secret prompts require an interactive terminal. Use `trex config set KEY` from a terminal or save the value in the dashboard."));
   }
   process.stdout.write(`${label}: `);
   try {
@@ -109,7 +106,7 @@ export function promptSecret(label: string): Promise<string> {
   } catch (error) {
     try { input.setRawMode(false); } catch { /* terminal never entered raw mode */ }
     input.pause();
-    return Promise.reject(new Error(`Could not enable hidden terminal input: ${error instanceof Error ? error.message : String(error)}. Use an interactive terminal or set the key through the process environment.`));
+    return Promise.reject(new Error(`Could not enable hidden terminal input: ${error instanceof Error ? error.message : String(error)}. Use an interactive terminal or save the key in the dashboard.`));
   }
   return new Promise<string>((resolveSecret, rejectSecret) => {
     let secret = "";
@@ -163,11 +160,10 @@ function effectiveProviderKey(env: NodeJS.ProcessEnv, provider: string): string 
 export async function configureEnvironment(
   mode: EngineMode,
   options: { requireAutoTrading?: boolean; askAutoTrading?: boolean } = {},
-  env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Interactive setup requires a terminal. Use `trex config set` or CLI --set overrides instead.");
   const profileContext = createProfileContext();
-  env = { ...profileContext.profiles.resolve(), ...env };
+  const env: NodeJS.ProcessEnv = { ...profileContext.profiles.resolve(), ...getInvocationConfiguration() };
   const updates: Partial<Record<EngineEnvironmentKey, string>> = {};
   let provider: string;
   for (;;) {
@@ -258,7 +254,6 @@ export async function configureEnvironment(
     else settings[key] = value;
   }
   profileContext.profiles.update(profileContext.profiles.activeId(), { settings, secrets });
-  for (const [key, value] of Object.entries(updates)) if (value !== undefined) env[key as EngineEnvironmentKey] = value;
   const activeName = profileContext.profiles.get(profileContext.profiles.activeId()).name;
   profileContext.repository.close();
   process.stdout.write(`Saved configuration to profile '${activeName}'.\n`);
@@ -269,7 +264,10 @@ export async function configureEnvironment(
 export async function persistConfigValue(keyInput: string, suppliedValue?: string): Promise<void> {
   const key = keyInput.trim().toUpperCase();
   if (!allowedKeys.has(key)) throw new Error(`Unknown configuration key ${key}.`);
-  const secret = /(?:API_KEY|KEYS_JSON)/.test(key);
+  const secret = [
+    "AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY",
+    "AI_PROVIDER_KEYS_JSON", "RESEARCH_ENDPOINTS_JSON", "MARKET_QUOTE_FALLBACKS_JSON",
+  ].includes(key);
   const value = suppliedValue ?? (secret ? await promptSecret(`${key} (input hidden)`) : await promptText(key));
   const context = createProfileContext();
   try {
@@ -306,7 +304,7 @@ export async function removeConfigValue(keyInput: string): Promise<void> {
       delete settings[key];
       context.profiles.update(profileId, { settings });
     }
-    process.stdout.write(`Removed ${key} from the active configuration profile. Process environment settings can still override it.\n`);
+    process.stdout.write(`Removed ${key} from the active configuration profile. The built-in default now applies unless a one-run CLI override is supplied.\n`);
   } finally { context.repository.close(); }
 }
 

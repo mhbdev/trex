@@ -23,7 +23,7 @@ import type { RunReport } from "@trex/engine/domain/types";
 import { runBacktest } from "@trex/engine/modes/backtest";
 import { runLiveCycle } from "@trex/engine/modes/live";
 import { runShadowCycle } from "@trex/engine/modes/shadow";
-import { createLiveExecution, createRuntime, publicConfig } from "./runtime.ts";
+import { createLiveExecution, createRuntime, getDatabaseUrl, publicConfig } from "./runtime.ts";
 
 type Mode = "backtest" | "shadow" | "live";
 type RunStatus = "starting" | "running" | "waiting" | "stopping" | "completed" | "failed" | "stopped";
@@ -50,14 +50,14 @@ const settingGroups: Record<string, string> = {
   RISK_FEE_BUFFER_BPS: "Risk & safety", RISK_MAX_MARKET_SLIPPAGE_BPS: "Risk & safety", RISK_KILL_SWITCH: "Risk & safety",
   ENGINE_STRATEGIES_JSON: "Strategies", MEMORY_HOLDING_PERIOD_BARS: "Memory", MEMORY_BENCHMARK_SYMBOL: "Memory",
   PAPER_INITIAL_CASH: "Simulation", BACKTEST_FEE_BPS: "Simulation", BACKTEST_SLIPPAGE_BPS: "Simulation",
-  MARKET_QUOTE_FALLBACKS_JSON: "Data sources", RESEARCH_ENDPOINTS_JSON: "Data sources", DATABASE_URL: "Advanced",
+  MARKET_QUOTE_FALLBACKS_JSON: "Data sources",
   LOG_LEVEL: "Advanced", ENGINE_MODE: "Advanced", BOXAPI_BASE_URL: "AI & agents", LIARA_BASE_URL: "AI & agents",
   LIARA_WORKSPACE_ID: "AI & agents",
 };
 
 function envValue(config: EngineConfig): Record<string, string> {
   return {
-    DATABASE_URL: config.databaseUrl, LOG_LEVEL: config.logLevel, ENGINE_MODE: config.defaultMode,
+    LOG_LEVEL: config.logLevel, ENGINE_MODE: config.defaultMode,
     WALLEX_BASE_URL: config.wallex.baseUrl, WALLEX_WS_URL: config.wallex.wsUrl,
     WALLEX_ENABLE_LIVE_TRADING: String(config.wallex.liveEnabled), WALLEX_ENABLE_AUTOTRADING: String(config.wallex.autoTradingEnabled),
     WALLEX_ALLOWED_MARKETS: config.wallex.allowedMarkets.join(","), WALLEX_PACKAGE_ID: config.wallex.packageId ?? "",
@@ -333,10 +333,27 @@ export async function importDotenvFile(input: { path: string; name: string; prof
     for (const envelope of envelopes) decryptProfileSecret(profile.id, envelope, key);
   }
   profiles.effectiveConfig(profile.id);
-  const scrubbed = original.split(/(?<=\n)/).filter((line) => {
-    const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/);
-    return !match || !secretKeys.has(match[1]!);
-  }).join("");
+  const configurationKeys = new Set<string>([...engineEnvironmentKeys, "DATABASE_URL", "ENCRYPTION_KEY"]);
+  const lines = original.split(/(?<=\n)/);
+  const keptLines: string[] = [];
+  let removingQuotedValue: string | undefined;
+  for (const line of lines) {
+    if (removingQuotedValue) {
+      if (dotenvQuoteCloses(line, removingQuotedValue, 0)) removingQuotedValue = undefined;
+      continue;
+    }
+    const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=([\s\S]*)$/);
+    if (!match || !configurationKeys.has(match[1]!)) {
+      keptLines.push(line);
+      continue;
+    }
+    const value = match[2]!.trimStart();
+    const quote = value[0];
+    if ((quote === "\"" || quote === "'" || quote === "`") && !dotenvQuoteCloses(value, quote, 1)) {
+      removingQuotedValue = quote;
+    }
+  }
+  const scrubbed = keptLines.join("");
   if (scrubbed !== original) {
     const latestInfo = await lstat(path);
     const latest = await readFile(path, "utf8");
@@ -351,20 +368,35 @@ export async function importDotenvFile(input: { path: string; name: string; prof
       throw error;
     }
   }
-  return { profile: summarizeProfile(profiles.get(profile.id)), removedSecretAssignments: original.split(/\r?\n/).filter((line) => {
+  return { profile: summarizeProfile(profiles.get(profile.id)), removedConfigurationAssignments: original.split(/\r?\n/).filter((line) => {
     const match = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/);
-    return match && secretKeys.has(match[1]!);
+    return match && configurationKeys.has(match[1]!);
   }).length, file: basename(path) };
 }
 
-export async function startAdminServer(options: { host?: string; port?: number; open?: boolean; environment?: NodeJS.ProcessEnv } = {}) {
+function dotenvQuoteCloses(value: string, quote: string, startAt: number): boolean {
+  let escaped = false;
+  for (let index = startAt; index < value.length; index += 1) {
+    const character = value[index]!;
+    if (quote === "\"" && character === "\\") {
+      escaped = !escaped;
+      continue;
+    }
+    if (character === quote && !escaped) return true;
+    escaped = false;
+  }
+  return false;
+}
+
+export async function startAdminServer(options: { host?: string; port?: number; open?: boolean; environment?: NodeJS.ProcessEnv; databaseUrl?: string } = {}) {
   const host = options.host ?? "127.0.0.1";
   if (host !== "127.0.0.1") throw new Error("The local admin API may only bind to 127.0.0.1.");
   const environment = options.environment ?? process.env;
-  const baseConfig = loadConfig(environment);
+  const databaseUrl = options.databaseUrl ?? getDatabaseUrl();
+  const baseConfig = loadConfig({ DATABASE_URL: databaseUrl });
   const repository = new SqliteRunRepository(baseConfig.databaseUrl);
   repository.migrate();
-  const profiles = new ConfigurationProfileService(repository, Date.now, () => environment);
+  const profiles = new ConfigurationProfileService(repository, Date.now, () => ({}), () => parseEncryptionKey(environment.ENCRYPTION_KEY ?? ""), databaseUrl);
   profiles.list();
   const runs = new RunManager(profiles);
   const token = randomUUID() + randomUUID();
@@ -389,8 +421,8 @@ export async function startAdminServer(options: { host?: string; port?: number; 
     const values = envValue(config);
     return engineEnvironmentKeys.map((key) => ({
       key, group: settingGroups[key] ?? "Advanced", value: secretKeys.has(key) ? "" : profile.settings[key] ?? values[key] ?? "",
-      source: environment[key] !== undefined ? "process" : profile.settings[key] !== undefined ? "profile" : "default",
-      writable: !secretKeys.has(key) && key !== "DATABASE_URL" && key !== "LOG_LEVEL" && key !== "ENGINE_MODE",
+      source: profile.settings[key] !== undefined ? "profile" : "default",
+      writable: !secretKeys.has(key),
       secret: secretKeys.has(key),
     }));
   }

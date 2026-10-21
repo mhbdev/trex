@@ -28,6 +28,7 @@ import { promptSecret } from "./configuration.ts";
 
 const program = new Command();
 program.name("trex").description("Trex crypto research, backtesting, shadow trading, and Wallex spot execution.").version("0.1.0");
+program.option("--database-url <url>", "SQLite database location for this invocation (bootstrap only; not a profile setting)");
 program.addHelpText("after", `
 Quick start:
   trex configure --mode shadow
@@ -140,7 +141,7 @@ configureCommand.action(async (options: { mode: string }) => {
   console.log(JSON.stringify({ config: publicConfig(loadEffectiveConfig()) }, null, 2));
 });
 
-const profileCommand = program.command("profile").description("Manage encrypted local environment profiles.");
+const profileCommand = program.command("profile").description("Manage encrypted local configuration profiles.");
 profileCommand.command("list").description("List named profiles and their configured secret status.").action(() => {
   const context = createProfileContext();
   try { console.log(JSON.stringify({ activeProfileId: context.profiles.activeId(), profiles: context.profiles.list() }, null, 2)); }
@@ -173,9 +174,9 @@ profileCommand.command("import-dotenv").description("Import settings into an enc
   });
 
 const secretsCommand = program.command("secrets").description("Manage the external profile-encryption key.");
-secretsCommand.command("generate-key").description("Generate a random 32-byte ENCRYPTION_KEY (store it outside this database and outside dotenv files).")
+secretsCommand.command("generate-key").description("Generate a random 32-byte encryption master key for an OS secret manager.")
   .action(() => console.log(generateEncryptionKey()));
-secretsCommand.command("rekey").description("Re-encrypt all profile secrets from a previously used key to ENCRYPTION_KEY in the process environment.")
+secretsCommand.command("rekey").description("Re-encrypt stored profile secrets with the configured encryption master key.")
   .action(async () => {
     const newKey = parseEncryptionKey();
     const oldKey = parseEncryptionKey(await promptSecret("Enter previous ENCRYPTION_KEY (input hidden)"));
@@ -209,7 +210,7 @@ configCommand.command("unset")
   .action(async (key: string) => removeConfigValue(key));
 
 const validateCommand = addConfigOptions(program.command("validate")
-  .description("Validate environment and mode-specific safety settings.")
+  .description("Validate active database settings and mode-specific safety requirements.")
   .addOption(new Option("--mode <mode>", "backtest, shadow, or live").choices(["backtest", "shadow", "live"]).default("shadow")));
 validateCommand.action(async (options: { mode: string } & Record<string, unknown>) => {
   const mode = ModeSchema.parse(options.mode);

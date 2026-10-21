@@ -2,7 +2,7 @@ import { z } from "zod";
 import Decimal from "decimal.js";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { join } from "node:path";
 import { ModeSchema, RoleSchema, type AgentRole, type EngineMode, type RiskLimits } from "./types.ts";
 import { parseStrategyProfiles, type StrategyProfile } from "./strategies.ts";
 import { normalizeMarketSymbol } from "./market-symbol.ts";
@@ -26,15 +26,14 @@ const secureProviderUrl = z.url().refine((value) => {
 const httpsUrl = z.url().refine((value) => new URL(value).protocol === "https:", "must use HTTPS");
 const wssUrl = z.url().refine((value) => new URL(value).protocol === "wss:", "must use WSS");
 
-export function defaultDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+export function defaultDatabaseUrl(): string {
   let dataDirectory: string;
   if (process.platform === "win32") {
-    dataDirectory = env.LOCALAPPDATA || env.APPDATA || join(homedir(), "AppData", "Local");
+    dataDirectory = join(homedir(), "AppData", "Local");
   } else if (process.platform === "darwin") {
     dataDirectory = join(homedir(), "Library", "Application Support");
   } else {
-    const xdgDataHome = env.XDG_DATA_HOME;
-    dataDirectory = xdgDataHome && isAbsolute(xdgDataHome) ? xdgDataHome : join(homedir(), ".local", "share");
+    dataDirectory = join(homedir(), ".local", "share");
   }
   // Preserve databases created by the previous product name instead of silently starting with an empty Trex profile store.
   const legacyDatabase = join(dataDirectory, "wallex-trading-agents", "wallex.sqlite");
@@ -43,6 +42,7 @@ export function defaultDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string
 }
 
 const envSchema = z.object({
+  // DATABASE_URL is accepted only as an explicit bootstrap argument. It is not a profile setting.
   DATABASE_URL: z.preprocess((value) => value === "" ? undefined : value, z.string().optional()),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   ENGINE_MODE: ModeSchema.default("shadow"),
@@ -92,8 +92,8 @@ const envSchema = z.object({
   RISK_KILL_SWITCH: bool(false),
 });
 
-export type EngineEnvironmentKey = keyof z.infer<typeof envSchema>;
-export const engineEnvironmentKeys = Object.keys(envSchema.shape) as EngineEnvironmentKey[];
+export type EngineEnvironmentKey = Exclude<keyof z.infer<typeof envSchema>, "DATABASE_URL">;
+export const engineEnvironmentKeys = Object.keys(envSchema.shape).filter((key) => key !== "DATABASE_URL") as EngineEnvironmentKey[];
 
 export interface EngineConfig {
   databaseUrl: string;
@@ -168,7 +168,7 @@ export function normalizeJsonEnvironmentValue(value: string, key: string): strin
   }
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): EngineConfig {
+export function loadConfig(env: Readonly<Record<string, string | undefined>> = {}): EngineConfig {
   const normalizedEnv = { ...env };
   for (const key of jsonEnvironmentKeys) {
     const value = normalizedEnv[key];
@@ -207,7 +207,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EngineConfig {
     throw new Error(`AI_DISABLED_AGENTS_JSON may disable only optional roles: ${[...optionalRoles].join(", ")}. Required debate, execution, risk, portfolio, and market-technical roles cannot be disabled.`);
   }
   const cfg: EngineConfig = {
-    databaseUrl: parsed.DATABASE_URL ?? defaultDatabaseUrl(env),
+    databaseUrl: parsed.DATABASE_URL ?? defaultDatabaseUrl(),
     logLevel: parsed.LOG_LEVEL,
     defaultMode: parsed.ENGINE_MODE,
     wallex: {

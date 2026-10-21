@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { engineEnvironmentKeys, loadConfig, type AiProviderId, type EngineEnvironmentKey } from "../domain/config.ts";
+import { defaultDatabaseUrl } from "../domain/config.ts";
 import type { RunRepository, StoredConfigProfile, StoredSecretEnvelope } from "./ports.ts";
 import { decryptProfileSecret, encryptProfileSecret, parseEncryptionKey } from "../adapters/security/secret-vault.ts";
 
@@ -36,8 +37,10 @@ export class ConfigurationProfileService {
   constructor(
     private readonly repository: RunRepository,
     private readonly now: () => number = Date.now,
-    private readonly environment: () => NodeJS.ProcessEnv = () => process.env,
+    // Compatibility slot for older callers; general environment values are never read.
+    _legacyEnvironment: () => NodeJS.ProcessEnv = () => ({}),
     private readonly encryptionKey: () => Buffer = () => parseEncryptionKey(),
+    private readonly databaseUrl: string = defaultDatabaseUrl(),
   ) {}
 
   list(): ConfigProfileSummary[] {
@@ -117,9 +120,9 @@ export class ConfigurationProfileService {
       nextSecretRows = [...encryptedSecretMap.values()];
       // Validate the resulting configuration before storing any changes.
       const secretsEnv = key ? this.secretsToEnvironment(id, nextSecretRows, key) : {};
-      const candidate = { ...settings, ...secretsEnv, ...this.processOverrides() };
+      const candidate = { ...settings, ...secretsEnv, DATABASE_URL: this.databaseUrl };
       loadConfig(candidate as NodeJS.ProcessEnv);
-    } else loadConfig({ ...settings, ...this.resolveSecrets(id), ...this.processOverrides() } as NodeJS.ProcessEnv);
+    } else loadConfig({ ...settings, ...this.resolveSecrets(id), DATABASE_URL: this.databaseUrl } as NodeJS.ProcessEnv);
     const updated: StoredConfigProfile = { ...current, name, settings, updatedAt: this.now() };
     this.repository.saveConfigProfile(updated, nextSecretRows);
     return this.get(id);
@@ -129,7 +132,7 @@ export class ConfigurationProfileService {
     const profile = this.repository.getConfigProfile(id);
     if (!profile) throw new Error(`Configuration profile '${id}' was not found.`);
     const secrets = this.resolveSecrets(id);
-    loadConfig({ ...profile.settings, ...secrets, ...this.processOverrides() } as NodeJS.ProcessEnv);
+    loadConfig({ ...profile.settings, ...secrets, DATABASE_URL: this.databaseUrl } as NodeJS.ProcessEnv);
     this.repository.setActiveConfigProfileId(id);
     return this.get(id);
   }
@@ -143,7 +146,11 @@ export class ConfigurationProfileService {
     this.ensureDefault();
     const profile = this.repository.getConfigProfile(id);
     if (!profile) throw new Error(`Configuration profile '${id}' was not found.`);
-    return { ...profile.settings, ...this.resolveSecrets(id), ...this.processOverrides() } as NodeJS.ProcessEnv;
+    const settings = { ...profile.settings };
+    // Older releases could import DATABASE_URL into profile JSON, but the active database
+    // cannot be selected by a value stored inside that same database.
+    delete settings.DATABASE_URL;
+    return { ...settings, ...this.resolveSecrets(id), DATABASE_URL: this.databaseUrl } as NodeJS.ProcessEnv;
   }
 
   effectiveConfig(id = this.activeId()) {
@@ -154,7 +161,10 @@ export class ConfigurationProfileService {
     const target = profileId ? this.repository.getConfigProfile(profileId) : undefined;
     if (profileId && !target) throw new Error(`Configuration profile '${profileId}' was not found.`);
     for (const key of Object.keys(env)) {
-      if (forbiddenProfileKeys.has(key)) throw new Error("ENCRYPTION_KEY must be supplied by the process environment, not imported from a dotenv file.");
+      if (forbiddenProfileKeys.has(key)) throw new Error("ENCRYPTION_KEY must be supplied by the OS or process secret manager, not imported from a dotenv file.");
+      // A legacy dotenv database path is used only when explicitly supplied as a bootstrap
+      // option. It is never copied into the newly imported runtime profile.
+      if (key === "DATABASE_URL") continue;
       if (!engineEnvironmentKeys.includes(key as EngineEnvironmentKey)) throw new Error(`Unknown configuration setting '${key}' in the import file.`);
     }
     const secretInput: Record<string, string> = {};
@@ -169,7 +179,7 @@ export class ConfigurationProfileService {
           secretInput[`AI_PROVIDER_KEY:${provider}`] = secret;
         }
       } else if (secretEnvironmentKeys.has(key as EngineEnvironmentKey)) secretInput[key] = value;
-      else if (key !== "DATABASE_URL" && key !== "LOG_LEVEL") settings[key] = value;
+      else settings[key] = value;
     }
     const activeProfile = target ?? this.create(name);
     const existing = this.repository.getConfigProfile(activeProfile.id)!;
@@ -192,13 +202,23 @@ export class ConfigurationProfileService {
       if (secretKey.startsWith("AI_PROVIDER_KEY:")) candidateSecrets.AI_PROVIDER_KEYS_JSON = JSON.stringify(providerKeys);
       else if (value) candidateSecrets[secretKey] = value;
     }
-    loadConfig({ ...settings, ...candidateSecrets, ...this.processOverrides() } as NodeJS.ProcessEnv);
+    loadConfig({ ...settings, ...candidateSecrets, DATABASE_URL: this.databaseUrl } as NodeJS.ProcessEnv);
     this.repository.saveConfigProfile({ ...existing, settings, updatedAt: this.now() }, envelopes);
     return this.get(activeProfile.id);
   }
 
   private ensureDefault(): void {
-    const profiles = this.repository.listConfigProfiles();
+    const profiles = this.repository.listConfigProfiles().map((profile) => {
+      if (!Object.hasOwn(profile.settings, "DATABASE_URL") && !Object.hasOwn(profile.settings, "ENCRYPTION_KEY")) return profile;
+      // These bootstrap secrets/settings cannot be profile values. Clean legacy rows on
+      // first access so they cannot leak into profile APIs or block future edits.
+      const settings = { ...profile.settings };
+      delete settings.DATABASE_URL;
+      delete settings.ENCRYPTION_KEY;
+      const migrated = { ...profile, settings, updatedAt: this.now() };
+      this.repository.saveConfigProfile(migrated);
+      return migrated;
+    });
     if (profiles.length > 0) {
       if (!this.repository.getActiveConfigProfileId()) this.repository.setActiveConfigProfileId(profiles[0]!.id);
       return;
@@ -245,10 +265,4 @@ export class ConfigurationProfileService {
     };
   }
 
-  private processOverrides(): Record<string, string | undefined> {
-    const result: Record<string, string | undefined> = {};
-    const environment = this.environment();
-    for (const key of engineEnvironmentKeys) if (environment[key] !== undefined) result[key] = environment[key];
-    return result;
-  }
 }

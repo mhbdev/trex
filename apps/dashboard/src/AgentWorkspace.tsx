@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, CircleHelp, RotateCcw, Search, ShieldCheck, Sparkles, Workflow } from "lucide-react";
+import { Check, ChevronDown, CircleHelp, RotateCcw, Search, ShieldCheck, Sparkles, Workflow } from "lucide-react";
 import { api } from "./api";
 import { agentDefinitions, agentStageTitle, agentStages, type AgentDefinition, type AgentStage } from "./agent-catalog";
 import { AppSelect, FieldLabelInfo, InfoTooltip } from "./ui-primitives";
 
 type Locale = "fa" | "en";
 type AgentMap<T> = Record<string, T>;
-type SettingField = { key: string; source: "process" | "profile" | "default"; writable: boolean };
+type SettingField = { key: string; source: "profile" | "default"; writable: boolean };
 type Props = {
   profileId: string;
   config: Record<string, any>;
@@ -64,7 +64,7 @@ function AgentCard({
     remit: "مسئولیت پیش‌فرض", instructions: "دستور تکمیلی عامل", instructionsHelp: "این متن به مأموریت پیش‌فرض اضافه می‌شود و آن را جایگزین نمی‌کند. محدودیت‌های ایمنی موتور همچنان لازم‌الاجرا هستند. این دستور در تنظیمات اجرا ذخیره می‌شود؛ کلید API یا اطلاعات محرمانه را وارد نکنید.",
     instructionsPlaceholder: "مثال: فقط به شواهد دو ساعت اخیر وزن بده و اختلاف قیمت را صریح ذکر کن…",
     steps: "حداکثر گام ابزار", noTools: "این نقش از ابزار پژوهش استفاده نمی‌کند.", reset: "بازنشانی تنظیمات این عامل",
-    enabledHelp: "با غیرفعال‌کردن، این نقش از چرخه‌های جدید حذف می‌شود. پژوهش تکنیکال، مناظره صعودی/نزولی، معامله‌گر، هیئت ریسک و مدیر پرتفوی برای حفظ ایمنی و سازگاری با گردش‌کار مرجع قابل غیرفعال‌سازی نیستند.",
+    enabledHelp: "با غیرفعال‌کردن، این نقش از چرخه‌های جدید حذف می‌شود. پژوهش تکنیکال، مناظره صعودی/نزولی، معامله‌گر، هیئت ریسک و مدیر پرتفوی برای حفظ ایمنی و انسجام گردش‌کار موتور قابل غیرفعال‌سازی نیستند.",
     routeHelp: "مدلی که این نقش در این پروفایل استفاده می‌کند. اگر مدل اختصاصی ثبت نشود، مدل پیش‌فرض پروفایل به کار می‌رود.",
     providerHelp: "ارائه‌دهنده‌ای که برای فراخوانی این عامل استفاده می‌شود. کلید معتبر همان ارائه‌دهنده باید در تنظیمات اعتبارنامه‌ها موجود باشد.",
     modelHelp: "شناسه دقیق مدل در همان ارائه‌دهنده؛ نام مدل میان ارائه‌دهندگان قابل جایگزینی خودکار نیست.",
@@ -75,22 +75,25 @@ function AgentCard({
     remit: "Default remit", instructions: "Additional agent instructions", instructionsHelp: "This text supplements the built-in remit; it does not replace it. Engine safety constraints still apply. Instructions are saved with run configuration snapshots, so do not enter API keys or other secrets.",
     instructionsPlaceholder: "Example: prioritize evidence from the last two hours and call out spread changes…",
     steps: "Maximum tool steps", noTools: "This role does not use research tools.", reset: "Reset this agent",
-    enabledHelp: "Disabling removes this role from new runs. Technical analysis, bull/bear debate, trader, risk reviewers, and portfolio manager remain required for safety and reference-workflow parity.",
+    enabledHelp: "Disabling removes this role from new runs. Technical analysis, bull/bear debate, trader, risk reviewers, and portfolio manager remain required for safety and workflow consistency.",
     routeHelp: "Model used by this role in this profile. If no dedicated route is saved, the profile default is used.",
     providerHelp: "Provider used for this agent call. A valid credential for the selected provider must be configured.",
     modelHelp: "Exact model identifier at that provider. Model names are provider-specific and are not translated automatically.",
     stepsHelp: "Maximum read-only tool calls for this role, from 1 to 8. More steps can inspect more data and may increase time and usage.",
   };
   const routeHelp = strings.routeHelp;
-  return <article className={`agent-card ${enabled ? "" : "is-disabled"}`}>
-    <div className="agent-card-top">
+  return <details className={`agent-card ${enabled ? "" : "is-disabled"}`} open={agent.role === "market_technical_analyst"}>
+    <summary className="agent-card-summary" aria-label={`${agent.name[locale]} · ${agentStageTitle(agent.stage, locale)} · ${route.provider}:${route.model}`}>
       <span className="agent-icon"><Icon size={18} strokeWidth={1.8} aria-hidden="true" /></span>
-      <div className="agent-identity">
-        <h3>{agent.name[locale]}</h3>
-        <code dir="ltr">{agent.role}</code>
-      </div>
+      <span className="agent-summary-copy"><b>{agent.name[locale]}</b><small>{agentStageTitle(agent.stage, locale)} · <span dir="ltr">{route.provider}:{route.model}</span></small></span>
+      <span className={`status ${agent.required ? "status-pass" : enabled ? "status-running" : "status-neutral"}`}>{agent.required ? strings.required : enabled ? strings.active : strings.inactive}</span>
+      <ChevronDown className="agent-card-chevron" size={16} aria-hidden="true" />
+    </summary>
+    <div className="agent-card-content">
+    <div className="agent-card-top">
+      <small className="technical-id" dir="ltr">{agent.role}</small>
       {agent.required
-        ? <span className="status status-pass"><ShieldCheck size={12} aria-hidden="true" />{strings.required}</span>
+        ? <span className="agent-required-note"><ShieldCheck size={12} aria-hidden="true" />{strings.required}</span>
         : <label className="agent-enable-toggle">
           <input type="checkbox" role="switch" aria-checked={enabled} aria-label={`${agent.name[locale]} · ${enabled ? strings.active : strings.inactive}`} disabled={enabledLocked} checked={enabled} onChange={(event) => onEnabled(event.target.checked)} />
           <span>{enabled ? strings.active : strings.inactive}</span>
@@ -120,7 +123,8 @@ function AgentCard({
         <textarea rows={3} maxLength={2_000} value={instructions} disabled={promptLocked} placeholder={strings.instructionsPlaceholder} onChange={(event) => onInstructions(event.target.value)} />
       </label>
     </details>
-  </article>;
+    </div>
+  </details>;
 }
 
 export function AgentWorkspace({ profileId, config, fields, locale, notify, onRefresh }: Props) {
@@ -147,7 +151,7 @@ export function AgentWorkspace({ profileId, config, fields, locale, notify, onRe
   const fieldState = (key: string): SettingField => fields.find((field) => field.key === key) ?? { key, source: "default", writable: true };
   const locked = useMemo(() => Object.fromEntries([
     "AI_ROLE_MODELS_JSON", "AI_ROLE_INSTRUCTIONS_JSON", "AI_ROLE_MAX_TOOL_STEPS_JSON", "AI_DISABLED_AGENTS_JSON",
-  ].map((key) => [key, fieldState(key).source === "process" || !fieldState(key).writable])), [fields]);
+  ].map((key) => [key, !fieldState(key).writable])), [fields]);
   const visible = agentDefinitions.filter((agent) => {
     const query = `${agent.role} ${agent.name.fa} ${agent.name.en} ${agent.remit.fa} ${agent.remit.en}`.toLocaleLowerCase();
     return (!stageFilter || agent.stage === stageFilter) && (!search || query.includes(search.toLocaleLowerCase()));
@@ -160,22 +164,22 @@ export function AgentWorkspace({ profileId, config, fields, locale, notify, onRe
   const initialDisabled = strings(ai.disabledRoles);
   const dirty = JSON.stringify(routes) !== JSON.stringify(initialRoutes) || JSON.stringify(instructions) !== JSON.stringify(initialInstructions) || JSON.stringify(steps) !== JSON.stringify(initialSteps) || JSON.stringify([...disabledRoles].sort()) !== JSON.stringify([...initialDisabled].sort());
   const inputTexts = fa ? {
-    summary: "ترکیب عامل‌ها", summaryDetail: "نقش‌های مرجع TradingAgents با مسیرهای مدل و دستورهای قابل‌تنظیم برای هر پروفایل.",
-    flowTitle: "گردش‌کار عامل‌ها", flowDescription: "تحلیل‌گرها موازی کار می‌کنند؛ مناظره پس از آماده‌شدن یافته‌ها شروع می‌شود. هیچ عامل یا دستور سفارشی مستقیماً سفارش والکس ثبت نمی‌کند.",
+    summary: "ترکیب عامل‌ها", summaryDetail: "نقش‌های تحلیل، مناظره، ارزیابی ریسک و مدیریت پرتفوی را با مسیر مدل و دستورهای اختصاصی هر پروفایل تنظیم کنید.",
+    flowTitle: "گردش‌کار عامل‌ها", flowDescription: "۷ مرحله برای تحلیل موازی، مناظره، بررسی ریسک و ثبت تصمیم؛ عامل‌ها سفارش صرافی ارسال نمی‌کنند.",
     flow: ["تحلیل موازی", "مناظره صعودی / نزولی", "مدیر پژوهش", "پیشنهاد معامله‌گر", "هیئت ریسک", "تصمیم مدیر پرتفوی", "بازتاب پس از بلوغ حافظه"],
     active: "فعال در هر اجرا", roles: "نقش عامل", search: "جست‌وجوی نقش یا تخصص", allStages: "همه مراحل", stage: "مرحله کاری",
     save: "ذخیره تیم عامل‌ها", saved: "تنظیمات تیم عامل‌ها ذخیره شد.", saveError: "ذخیره تنظیمات عامل‌ها ناموفق بود.", discard: "لغو تغییرات", dirty: "تغییرات ذخیره‌نشده", clean: "همگام با پروفایل",
     safetyTitle: "مرزهای ایمنی موتور حفظ می‌شوند", safetyBody: "دستور تکمیلی فقط نقش و اولویت‌های تحلیل را تنظیم می‌کند. سقف‌ها، کنترل ریسک، اعتبارسنجی بازار و مجوز ارسال سفارش مستقل و قطعی باقی می‌مانند.",
-    envTitle: "برخی تنظیم‌ها از محیط فرایند می‌آیند", envBody: "مقادیر محیط فرایند بر پروفایل اولویت دارند. فیلدهای قفل‌شده را از فایل محیطی یا مدیریت استقرار تغییر دهید؛ ذخیره پروفایل آن‌ها را فعال نمی‌کند.",
+    envTitle: "برخی تنظیم‌ها برای این پروفایل قابل ویرایش نیستند", envBody: "برای تغییر آن‌ها، پروفایلی را انتخاب کنید که مالک تنظیمات باشد یا به صفحه پروفایل و تنظیمات بروید.",
     teamDefault: "مدل پیش‌فرض پروفایل", resetTitle: "تنظیمات هر عامل جداگانه قابل بازنشانی است.",
   } : {
-    summary: "Agent team", summaryDetail: "TradingAgents-style workflow roles with per-profile model routes and role guidance.",
-    flowTitle: "Agent workflow", flowDescription: "Analysts work in parallel; debate starts after their findings arrive. Agents and custom instructions cannot submit Wallex orders.",
+    summary: "Agent team", summaryDetail: "Configure research, debate, risk review, and portfolio roles with per-profile model routes and role guidance.",
+    flowTitle: "Agent workflow", flowDescription: "Seven stages for parallel research, debate, risk review, and recorded decisions. Agents cannot submit exchange orders.",
     flow: ["Parallel analysis", "Bull / bear debate", "Research manager", "Trader proposal", "Risk committee", "Portfolio decision", "Reflection after memory matures"],
     active: "active for new runs", roles: "roles", search: "Search role or remit", allStages: "All stages", stage: "Workflow stage",
     save: "Save agent team", saved: "Agent team settings saved.", saveError: "Could not save agent settings.", discard: "Discard changes", dirty: "Unsaved changes", clean: "In sync with profile",
     safetyTitle: "Engine safety boundaries remain in force", safetyBody: "Additional instructions tailor role focus. Position limits, deterministic risk gates, market validation, and order permissions remain independent and mandatory.",
-    envTitle: "Some settings come from the process environment", envBody: "Process values take precedence over profiles. Change locked fields in the process environment or deployment config; saving the profile will not override them.",
+    envTitle: "Some settings cannot be edited in this profile", envBody: "Select a profile that owns these settings or open Profiles & settings to review their source and access status.",
     teamDefault: "Profile default model", resetTitle: "Each agent can be reset to inherited defaults.",
   };
 
@@ -197,7 +201,7 @@ export function AgentWorkspace({ profileId, config, fields, locale, notify, onRe
     const configured = routes[agent.role];
     if (!configured) return false;
     const parts = routeParts(configured, fallbackProvider, fallbackModel);
-    return !providers.includes(parts.provider) || !parts.model.trim() || /[\r\n:]/.test(parts.model);
+    return !providers.includes(parts.provider) || !parts.model.trim() || /[\r\n]/.test(parts.model);
   });
   const routesValid = invalidRoutes.length === 0;
   const save = async () => {
@@ -211,7 +215,7 @@ export function AgentWorkspace({ profileId, config, fields, locale, notify, onRe
     if (!locked.AI_ROLE_MAX_TOOL_STEPS_JSON) settings.AI_ROLE_MAX_TOOL_STEPS_JSON = JSON.stringify(steps);
     if (!locked.AI_DISABLED_AGENTS_JSON) settings.AI_DISABLED_AGENTS_JSON = JSON.stringify([...new Set(disabledRoles)].sort());
     if (Object.keys(settings).length === 0) {
-      notify(fa ? "همه تنظیم‌های عامل با متغیرهای محیط فرایند قفل شده‌اند." : "All agent settings are locked by process environment values.");
+      notify(fa ? "همه تنظیم‌های عامل در این پروفایل فقط‌خواندنی هستند." : "All agent settings are read-only for this profile.");
       return;
     }
     setSaving(true);
@@ -237,10 +241,10 @@ export function AgentWorkspace({ profileId, config, fields, locale, notify, onRe
       <div className="agent-overview-meta"><span className="count-pill">{selectedCount}/{agentDefinitions.length} {inputTexts.active}</span><span className="agent-default-model"><span>{inputTexts.teamDefault}</span><code dir="ltr">{fallback}</code></span></div>
     </section>
 
-    <section className="agent-flow card" aria-labelledby="agent-flow-title">
-      <div className="agent-section-heading"><div><h2 id="agent-flow-title">{inputTexts.flowTitle}</h2><p>{inputTexts.flowDescription}</p></div><InfoTooltip label={inputTexts.flowTitle} help={fa ? "ترتیب در خود موتور اجرا می‌شود و از مسیرهای مدل قابل تغییر نیست. تحلیل‌گرها موازی اجرا می‌شوند؛ مناظره و بررسی ریسک تا تعداد دور تنظیم‌شده تکرار می‌شوند." : "Execution order is controlled by the engine, independent of model routes. Analysts run in parallel; debate and risk review repeat for the configured round counts."} /></div>
+    <details className="agent-flow card" aria-labelledby="agent-flow-title">
+      <summary className="agent-flow-summary"><div><h2 id="agent-flow-title">{inputTexts.flowTitle}</h2><p>{inputTexts.flowDescription}</p></div><ChevronDown size={16} aria-hidden="true" /></summary>
       <ol className="agent-flow-steps">{inputTexts.flow.map((step, index) => <li key={step}><span className="agent-flow-index">{String(index + 1).padStart(2, "0")}</span><span>{step}</span></li>)}</ol>
-    </section>
+    </details>
 
     <div className="notice info agent-safety-note"><ShieldCheck size={17} aria-hidden="true" /><div><b>{inputTexts.safetyTitle}</b><p>{inputTexts.safetyBody}</p></div></div>
     {Object.values(locked).some(Boolean) && <div className="notice warning agent-safety-note"><CircleHelp size={17} aria-hidden="true" /><div><b>{inputTexts.envTitle}</b><p>{inputTexts.envBody}</p></div></div>}
@@ -252,7 +256,7 @@ export function AgentWorkspace({ profileId, config, fields, locale, notify, onRe
       {dirty && <button className="button secondary" type="button" onClick={discard} disabled={saving}>{inputTexts.discard}</button>}
       <button className="button primary" type="button" onClick={() => void save()} disabled={!dirty || saving || !routesValid}><Check size={15} aria-hidden="true" />{saving ? (fa ? "در حال ذخیره…" : "Saving…") : inputTexts.save}</button>
     </div>
-    {!routesValid && <div className="notice warning agent-safety-note" role="alert"><CircleHelp size={17} aria-hidden="true" /><div><b>{fa ? "مسیر مدل نامعتبر است" : "A model route is incomplete"}</b><p>{fa ? `${invalidRoutes.map((agent) => agent.name.fa).join("، ")}: ارائه‌دهنده را انتخاب و شناسه مدل را بدون دو نقطه وارد کنید.` : `${invalidRoutes.map((agent) => agent.name.en).join(", ")}: select a provider and enter a model ID without a colon.`}</p></div></div>}
+    {!routesValid && <div className="notice warning agent-safety-note" role="alert"><CircleHelp size={17} aria-hidden="true" /><div><b>{fa ? "مسیر مدل نامعتبر است" : "A model route is incomplete"}</b><p>{fa ? `${invalidRoutes.map((agent) => agent.name.fa).join("، ")}: ارائه‌دهنده را انتخاب و شناسه مدل را بدون رفتن به خط بعد وارد کنید.` : `${invalidRoutes.map((agent) => agent.name.en).join(", ")}: select a provider and enter a model ID on a single line.`}</p></div></div>}
 
     {grouped.length === 0 ? <div className="empty"><span className="empty-mark"><Search size={18} aria-hidden="true" /></span><p>{fa ? "عاملی با این جست‌وجو پیدا نشد." : "No agents match your search."}</p></div> : grouped.map(({ stage, agents }) => <section className="agent-stage-group" key={stage} aria-labelledby={`agents-${stage}`}>
       <div className="agent-stage-heading"><h2 id={`agents-${stage}`}>{agentStageTitle(stage, locale)}</h2><span className="count-pill">{agents.length}</span><div /></div>

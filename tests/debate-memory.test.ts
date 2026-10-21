@@ -19,7 +19,7 @@ const portfolio = {
   realizedPnlToday: "0", observedAt: 60_000,
 };
 
-describe("TradingAgents debate and memory parity", () => {
+describe("agent debate, risk review, and decision memory", () => {
   test("alternates bull/bear turns and cycles risk reviewers in reference order", async () => {
     const repository = new SqliteRunRepository("file::memory:");
     try {
