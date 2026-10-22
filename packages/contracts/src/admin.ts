@@ -31,7 +31,7 @@ export const UpdateProfileSchema = z.object({
   settings: z.record(z.string(), z.string()).optional(),
   secrets: z.object({
     aiApiKey: z.string().optional(),
-    providerKeys: z.record(ProviderSchema, z.string()).optional(),
+    providerKeys: z.partialRecord(ProviderSchema, z.string()).optional(),
     wallexApiKey: z.string().optional(),
     subAccountClientId: z.string().optional(),
     researchEndpoints: z.string().optional(),
