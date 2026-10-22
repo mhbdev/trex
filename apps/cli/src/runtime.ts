@@ -1,6 +1,11 @@
 import { AiSdkModelAdapter } from "@trex/engine/adapters/ai/model";
 import { SqliteRunRepository } from "@trex/engine/adapters/persistence/store";
 import { ConfiguredJsonResearchProvider, HybridResearchAggregator } from "@trex/engine/application/research-aggregator";
+import { RedditRssResearchProvider, StockTwitsResearchProvider } from "@trex/engine/application/public-crypto-sentiment";
+import {
+  CoinDeskRssResearchProvider, CoinPaprikaProfileResearchProvider, CoinPaprikaResearchClient, CoinPaprikaSupplyResearchProvider,
+  TronScanActivityResearchProvider, TronScanChainParametersResearchProvider, TronScanGovernanceResearchProvider, TronScanResearchClient, TronScanRevenueResearchProvider, TronScanStakingResearchProvider, TronScanSupplyResearchProvider,
+} from "@trex/engine/application/public-crypto-research";
 import { TradingWorkflow } from "@trex/engine/application/trading-workflow";
 import { QuoteFailoverMarketData } from "@trex/engine/adapters/providers/quote-failover";
 import { WallexMarketDataAdapter, WallexOrderExecutionAdapter } from "@trex/engine/adapters/wallex/rest";
@@ -51,11 +56,26 @@ export function createRuntime(config = loadEffectiveConfig()) {
     quoteCurrency: config.wallex.quoteCurrency,
   });
   const marketData = new QuoteFailoverMarketData(marketAdapter, config.marketQuoteFallbacks);
-  const researchProviders = ConfiguredJsonResearchProvider.parseMany(config.researchEndpoints);
+  const coinPaprikaResearch = new CoinPaprikaResearchClient(fetch);
+  const tronScanResearch = new TronScanResearchClient(fetch, config.research.tronscanApiKey);
+  const researchProviders = [
+    new CoinPaprikaSupplyResearchProvider(coinPaprikaResearch, config.wallex.quoteCurrency),
+    new CoinPaprikaProfileResearchProvider(coinPaprikaResearch, config.wallex.quoteCurrency),
+    new CoinDeskRssResearchProvider(fetch, config.wallex.quoteCurrency),
+    new TronScanSupplyResearchProvider(tronScanResearch, config.wallex.quoteCurrency),
+    new TronScanStakingResearchProvider(tronScanResearch, config.wallex.quoteCurrency),
+    new TronScanGovernanceResearchProvider(tronScanResearch, config.wallex.quoteCurrency),
+    new TronScanChainParametersResearchProvider(tronScanResearch, config.wallex.quoteCurrency),
+    new TronScanRevenueResearchProvider(tronScanResearch, config.wallex.quoteCurrency),
+    new TronScanActivityResearchProvider(tronScanResearch, config.wallex.quoteCurrency),
+    ...(config.research.redditEnabled ? [new RedditRssResearchProvider(fetch, config.wallex.quoteCurrency)] : []),
+    ...(config.research.stocktwitsEnabled ? [new StockTwitsResearchProvider(fetch, config.wallex.quoteCurrency)] : []),
+    ...ConfiguredJsonResearchProvider.parseMany(config.researchEndpoints),
+  ];
   const aggregator = new HybridResearchAggregator(researchProviders);
   const repository = new SqliteRunRepository(config.databaseUrl);
   repository.migrate();
-  const model = new AiSdkModelAdapter(config, fetch, repository);
+  const model = new AiSdkModelAdapter(config, fetch, repository, marketAdapter);
   const workflow = new TradingWorkflow(config, marketData, aggregator, model, repository);
   return { config, marketAdapter, marketData, aggregator, model, repository, workflow };
 }
@@ -87,6 +107,8 @@ export function publicConfig(config: EngineConfig) {
       provider: config.ai.provider, model: config.ai.model,
       apiKeyConfigured: Boolean(config.ai.providerKeys[config.ai.provider] || config.ai.apiKey),
       requestTimeoutMs: config.ai.timeoutMs,
+      toolTimeoutMs: config.ai.toolTimeoutMs,
+      timeoutRetries: config.ai.timeoutRetries,
       boxapi: { baseUrl: config.ai.boxApiBaseUrl, apiKeyConfigured: Boolean(config.ai.providerKeys.boxapi) },
       liara: { baseUrl: config.ai.liaraBaseUrl, workspaceConfigured: Boolean(config.ai.liaraWorkspaceId), apiKeyConfigured: Boolean(config.ai.providerKeys.liara) },
       configuredProviders: ["openai", "anthropic", "google", "compatible", "boxapi", "liara"].filter((provider) =>

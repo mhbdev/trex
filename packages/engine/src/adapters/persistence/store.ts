@@ -7,7 +7,7 @@ import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { eq, desc } from "drizzle-orm";
 import * as schema from "./schema.ts";
 import type { EngineMode, ExchangeOrder, OrderIntent, PortfolioState, RiskResult, RunReport, TradeDecision, PendingDecisionMemory, SettledDecisionMemory } from "../../domain/types.ts";
-import type { AiModelCallRecord, RunAuditDetails, RunRepository, StoredConfigProfile, StoredSecretEnvelope } from "../../application/ports.ts";
+import type { AiModelCallRecord, ManagedRunAttemptRecord, RunAuditDetails, RunRepository, StoredConfigProfile, StoredSecretEnvelope } from "../../application/ports.ts";
 
 export class SqliteRunRepository implements RunRepository {
   private readonly sqlite: Database;
@@ -25,6 +25,55 @@ export class SqliteRunRepository implements RunRepository {
   }
 
   migrate(folder = resolve(import.meta.dir, "../../../drizzle")): void { migrate(this.db, { migrationsFolder: folder }); }
+
+  saveManagedRunAttempt(run: ManagedRunAttemptRecord): void {
+    this.sqlite.query(`INSERT INTO managed_run_attempts (
+      id, mode, profile_id, state, phase, message, started_at, updated_at, symbols_json, strategy_ids_json, error, workflow_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET mode = excluded.mode, profile_id = excluded.profile_id, state = excluded.state,
+      phase = excluded.phase, message = excluded.message, updated_at = excluded.updated_at,
+      symbols_json = excluded.symbols_json, strategy_ids_json = excluded.strategy_ids_json, error = excluded.error,
+      workflow_json = excluded.workflow_json`)
+      .run(run.id, run.mode, run.profileId, run.state, run.phase, run.message, run.startedAt, run.updatedAt,
+        JSON.stringify(run.symbols), JSON.stringify(run.strategyIds), run.error ?? null, JSON.stringify(run.workflow ?? {}));
+  }
+  getRecentManagedRunAttempts(limit: number): ManagedRunAttemptRecord[] {
+    const rows = this.sqlite.query(`SELECT * FROM managed_run_attempts ORDER BY started_at DESC, id DESC LIMIT ?`).all(limit) as Array<{
+      id: string; mode: ManagedRunAttemptRecord["mode"]; profile_id: string; state: string; phase: ManagedRunAttemptRecord["phase"];
+      message: string; started_at: number; updated_at: number; symbols_json: string; strategy_ids_json: string; error: string | null; workflow_json: string;
+    }>;
+    return rows.map((row) => ({
+      id: row.id, mode: row.mode, profileId: row.profile_id,
+      state: (["starting", "running", "waiting", "stopping", "completed", "failed", "stopped"].includes(row.state) ? row.state : "failed") as ManagedRunAttemptRecord["state"], phase: row.phase,
+      message: row.message, startedAt: row.started_at, updatedAt: row.updated_at,
+      symbols: JSON.parse(row.symbols_json), strategyIds: JSON.parse(row.strategy_ids_json),
+      ...(row.error ? { error: row.error } : {}),
+      ...(row.workflow_json && row.workflow_json !== "{}" ? { workflow: JSON.parse(row.workflow_json) } : {}),
+    }));
+  }
+  failInterruptedManagedRunAttempts(endedAt: number): void {
+    const interrupted = this.sqlite.query(`SELECT id, workflow_json FROM managed_run_attempts
+      WHERE state IN ('starting', 'running', 'waiting', 'stopping')`).all() as Array<{ id: string; workflow_json: string }>;
+    this.sqlite.query(`UPDATE managed_run_attempts SET state = 'failed', updated_at = ?,
+      message = 'The dashboard service restarted before this managed run completed.',
+      error = 'The service stopped before the managed run reached a recorded completion. Review engine audit rows for any completed cycles.'
+      WHERE state IN ('starting', 'running', 'waiting', 'stopping')`).run(endedAt);
+    for (const row of interrupted) {
+      try {
+        const workflow = JSON.parse(row.workflow_json) as ManagedRunAttemptRecord["workflow"];
+        if (!workflow) continue;
+        const stage = workflow.stages[workflow.currentStage];
+        if (stage?.status !== "active") continue;
+        workflow.stages[workflow.currentStage] = {
+          ...stage, status: "failed", updatedAt: endedAt,
+          detail: "The service restarted before this workflow stage completed.",
+        };
+        workflow.activeAgents = [];
+        workflow.updatedAt = endedAt;
+        this.sqlite.query("UPDATE managed_run_attempts SET workflow_json = ? WHERE id = ?").run(JSON.stringify(workflow), row.id);
+      } catch { /* Preserve a run row even if an older workflow snapshot is malformed. */ }
+    }
+  }
 
   createRun(input: { id: string; mode: EngineMode; config: Record<string, unknown>; startedAt: number; gitRevision?: string }): void {
     this.db.insert(schema.runs).values({

@@ -2,7 +2,7 @@ import Decimal from "decimal.js";
 import { Centrifuge } from "centrifuge";
 import { CandleSchema, MarketSpecSchema, type Candle, type ExchangeOrder, type Fill, type MarketQuote, type MarketSpec, type OrderProposal, type PortfolioState, type Side } from "../../domain/types.ts";
 import type { MarketDataPort, OrderExecutionPort } from "../../application/ports.ts";
-import { readJsonLimited } from "../providers/bounded-json.ts";
+import { readTextLimited } from "../providers/bounded-json.ts";
 
 export interface WallexOptions {
   baseUrl: string;
@@ -50,22 +50,61 @@ class WallexHttp {
       headers.set("x-api-key", this.options.apiKey);
       if (this.options.subAccountClientId) headers.set("sub-account-client-id", this.options.subAccountClientId);
     }
-    const signal = init.signal ?? AbortSignal.timeout(this.options.requestTimeoutMs ?? 10_000);
-    const response = await this.fetcher(`${this.options.baseUrl}${path}`, { ...init, headers, signal });
-    let body: unknown;
-    try { body = await readJsonLimited(response, 2_000_000); }
-    catch (error) {
-      if (error instanceof Error && error.message.includes("exceeded the 2000000-byte limit")) throw error;
-      throw new Error(`Wallex returned non-JSON HTTP ${response.status}.`);
+    const method = (init.method ?? "GET").toUpperCase();
+    // Only idempotent reads are retried. A POST or DELETE may have reached Wallex
+    // even when its response is malformed, so retrying it could duplicate an order.
+    const retryableRead = method === "GET";
+    const maxAttempts = retryableRead ? 3 : 1;
+    const url = this.options.baseUrl.replace(/\/+$/, "") + path;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      let response: Response;
+      try {
+        const requestSignal = AbortSignal.timeout(this.options.requestTimeoutMs ?? 10_000);
+        const signal = init.signal ? AbortSignal.any([init.signal, requestSignal]) : requestSignal;
+        response = await this.fetcher(url, {
+          ...init, headers,
+          signal,
+        });
+      } catch (error) {
+        if (!retryableRead || init.signal?.aborted || attempt === maxAttempts - 1) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
+        continue;
+      }
+
+      let body: unknown;
+      let responseText = "";
+      try {
+        responseText = await readTextLimited(response, 2_000_000);
+        body = JSON.parse(responseText.replace(/^\uFEFF/, "")) as unknown;
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("exceeded the 2000000-byte limit")) throw error;
+        const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() || "missing";
+        const trimmedBody = responseText.trimStart();
+        const bodyKind = !trimmedBody ? "empty or incomplete body" :
+          contentType.includes("html") || /^(?:<!doctype\s+html|<html\b|<head\b|<body\b)/i.test(trimmedBody) ? "HTML page" : "unrecognized body";
+        const detail = new Error(`Wallex returned non-JSON HTTP ${response.status} for ${path} (content-type: ${contentType}; ${bodyKind}).`);
+        const transientStatus = response.status === 429 || response.status >= 500;
+        if (retryableRead && !init.signal?.aborted && attempt < maxAttempts - 1 && (response.ok || transientStatus)) {
+          await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
+          continue;
+        }
+        throw detail;
+      }
+      if (!response.ok) {
+        const transientStatus = response.status === 429 || response.status >= 500;
+        if (retryableRead && !init.signal?.aborted && attempt < maxAttempts - 1 && transientStatus) {
+          await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
+          continue;
+        }
+        const message = asString(object(body).message, `HTTP ${response.status}`);
+        const error = new Error(`Wallex ${method} ${path} failed: ${message}`) as Error & { status?: number };
+        error.status = response.status;
+        throw error;
+      }
+      if (object(body).success === false) throw new Error(`Wallex rejected ${path}: ${asString(object(body).message, "unknown error")}`);
+      return body as T;
     }
-    if (!response.ok) {
-      const message = asString(object(body).message, `HTTP ${response.status}`);
-      const error = new Error(`Wallex ${init.method ?? "GET"} ${path} failed: ${message}`) as Error & { status?: number };
-      error.status = response.status;
-      throw error;
-    }
-    if (object(body).success === false) throw new Error(`Wallex rejected ${path}: ${asString(object(body).message, "unknown error")}`);
-    return body as T;
+    throw new Error(`Wallex ${method} ${path} request did not complete.`);
   }
   get optionsPublic(): Pick<WallexOptions, "packageId" | "allowedMarkets"> { return this.options; }
 }
@@ -88,9 +127,10 @@ export class WallexMarketDataAdapter implements MarketDataPort {
     this.depthCache.set(symbol.toUpperCase(), structuredClone(depth));
   }
 
-  private async marketRows(): Promise<JsonObject[]> {
+  private async marketRows(signal?: AbortSignal): Promise<JsonObject[]> {
+    signal?.throwIfAborted();
     if (this.marketRowsCache && this.http.now() - this.marketRowsObservedAt <= 1_000) return this.marketRowsCache;
-    const body = await this.http.request<unknown>("/hector/web/v1/markets");
+    const body = await this.http.request<unknown>("/hector/web/v1/markets", signal ? { signal } : {});
     const raw = object(unwrapResult(body)).markets;
     if (!Array.isArray(raw)) throw new Error("Wallex market response did not include result.markets.");
     this.marketRowsCache = raw.map(object);
@@ -98,8 +138,8 @@ export class WallexMarketDataAdapter implements MarketDataPort {
     return this.marketRowsCache;
   }
 
-  async listSpotMarkets(): Promise<MarketSpec[]> {
-    return (await this.marketRows()).map((value) => {
+  async listSpotMarkets(signal?: AbortSignal): Promise<MarketSpec[]> {
+    return (await this.marketRows(signal)).map((value) => {
       const symbol = asString(value.symbol).toUpperCase();
       const baseAssetIconUrl = wallexIconUrl(value.base_asset_icon, value.base_asset_png_icon, value.base_asset_svg_icon, value.base_icon);
       const quoteAssetIconUrl = wallexIconUrl(value.quote_asset_icon, value.quote_asset_png_icon, value.quote_asset_svg_icon, value.quote_icon);
@@ -118,11 +158,12 @@ export class WallexMarketDataAdapter implements MarketDataPort {
     }).filter((market) => market.spotEnabled);
   }
 
-  async getQuote(symbol: string): Promise<MarketQuote> {
+  async getQuote(symbol: string, signal?: AbortSignal): Promise<MarketQuote> {
+    signal?.throwIfAborted();
     const normalized = symbol.toUpperCase();
     const cached = this.quoteCache.get(normalized);
     if (cached && this.http.now() - cached.observedAt <= 5_000) return cached;
-    const rows = await this.marketRows();
+    const rows = await this.marketRows(signal);
     const raw = rows.find((item) => asString(item.symbol).toUpperCase() === normalized);
     const market = raw && MarketSpecSchema.parse({
       symbol: normalized, baseAsset: asString(raw.base_asset), quoteAsset: asString(raw.quote_asset),
@@ -134,12 +175,13 @@ export class WallexMarketDataAdapter implements MarketDataPort {
     return { symbol: market.symbol, price: asString(raw.price), observedAt: this.marketRowsObservedAt, source: "wallex-rest" };
   }
 
-  async getDepth(symbol: string): Promise<{ bids: [string, string][]; asks: [string, string][]; observedAt: number }> {
+  async getDepth(symbol: string, signal?: AbortSignal): Promise<{ bids: [string, string][]; asks: [string, string][]; observedAt: number }> {
+    signal?.throwIfAborted();
     const normalized = symbol.toUpperCase();
     const cached = this.depthCache.get(normalized);
     if (cached && this.http.now() - cached.observedAt <= 1000) return structuredClone(cached);
     const query = new URLSearchParams({ symbol: symbol.toUpperCase() });
-    const body = await this.http.request<unknown>(`/v1/depth?${query}`);
+    const body = await this.http.request<unknown>(`/v1/depth?${query}`, signal ? { signal } : {});
     const result = object(unwrapResult(body));
     const levels = (value: unknown): [string, string][] => Array.isArray(value) ? value.map((entry): [string, string] => {
       const row = object(entry);
@@ -150,9 +192,10 @@ export class WallexMarketDataAdapter implements MarketDataPort {
     return structuredClone(depth);
   }
 
-  async getCandles(symbol: string, fromSeconds: number, toSeconds: number, resolutionMinutes: 1 = 1): Promise<Candle[]> {
+  async getCandles(symbol: string, fromSeconds: number, toSeconds: number, resolutionMinutes: 1 = 1, signal?: AbortSignal): Promise<Candle[]> {
+    signal?.throwIfAborted();
     const query = new URLSearchParams({ symbol: symbol.toUpperCase(), resolution: String(resolutionMinutes), from: String(fromSeconds), to: String(toSeconds) });
-    const response = object(await this.http.request<unknown>(`/v1/udf/history?${query}`));
+    const response = object(await this.http.request<unknown>(`/v1/udf/history?${query}`, signal ? { signal } : {}));
     if (response.s !== "ok") {
       if (response.s === "no_data") return [];
       throw new Error(`Wallex candle endpoint status: ${asString(response.s, "missing")}`);

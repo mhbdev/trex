@@ -25,10 +25,10 @@ export class QuoteFailoverMarketData implements MarketDataPort {
     this.fallbacks = parseQuoteFallbacks(rawFallbacks);
   }
 
-  listSpotMarkets() { return this.primary.listSpotMarkets(); }
-  getDepth(symbol: string) { return this.primary.getDepth(symbol); }
-  getCandles(symbol: string, fromSeconds: number, toSeconds: number, resolutionMinutes?: 1) {
-    return this.primary.getCandles(symbol, fromSeconds, toSeconds, resolutionMinutes);
+  listSpotMarkets(signal?: AbortSignal) { return this.primary.listSpotMarkets(signal); }
+  getDepth(symbol: string, signal?: AbortSignal) { return this.primary.getDepth(symbol, signal); }
+  getCandles(symbol: string, fromSeconds: number, toSeconds: number, resolutionMinutes?: 1, signal?: AbortSignal) {
+    return this.primary.getCandles(symbol, fromSeconds, toSeconds, resolutionMinutes, signal);
   }
   getPackageUnavailableMarkets(packageId: string) {
     if (!this.primary.getPackageUnavailableMarkets) return Promise.reject(new Error("Primary market data adapter does not support package restrictions."));
@@ -39,9 +39,10 @@ export class QuoteFailoverMarketData implements MarketDataPort {
     return this.primary.getAccountPortfolio();
   }
 
-  async getQuote(symbol: string): Promise<MarketQuote> {
-    try { return await this.primary.getQuote(symbol); }
+  async getQuote(symbol: string, signal?: AbortSignal): Promise<MarketQuote> {
+    try { return await this.primary.getQuote(symbol, signal); }
     catch (primaryError) {
+      if (signal?.aborted) throw signal.reason ?? primaryError;
       const errors = [`wallex: ${primaryError instanceof Error ? primaryError.message : String(primaryError)}`];
       for (const fallback of this.fallbacks) {
         const controller = new AbortController();
@@ -49,13 +50,15 @@ export class QuoteFailoverMarketData implements MarketDataPort {
         try {
           const url = new URL(fallback.url);
           url.searchParams.set("symbol", symbol.toUpperCase());
-          const response = await this.fetcher(url, { ...(fallback.headers ? { headers: fallback.headers } : {}), signal: controller.signal });
+          const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+          const response = await this.fetcher(url, { ...(fallback.headers ? { headers: fallback.headers } : {}), signal: requestSignal });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           const raw = z.object({ symbol: z.string(), price: z.string().or(z.number().finite()), observedAt: z.number().int().optional() }).parse(await readJsonLimited(response, 256_000));
           if (raw.symbol.toUpperCase() !== symbol.toUpperCase()) throw new Error("response symbol did not match request");
           const observedAt = raw.observedAt ?? Date.now();
           return { symbol: raw.symbol.toUpperCase(), price: String(raw.price), observedAt, source: `fallback:${fallback.id}` };
         } catch (error) {
+          if (signal?.aborted) throw signal.reason ?? error;
           errors.push(`${fallback.id}: request failed (${error instanceof Error ? error.name : "unknown error"})`);
         } finally { clearTimeout(timeout); }
       }

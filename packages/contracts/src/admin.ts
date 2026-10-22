@@ -7,6 +7,7 @@ export const ProfileSecretStateSchema = z.object({
   providerKeys: z.record(ProviderSchema, z.boolean()),
   wallexApiKey: z.boolean(),
   subAccountClientId: z.boolean(),
+  tronscanApiKey: z.boolean().default(false),
   researchEndpoints: z.boolean().default(false),
   marketQuoteFallbacks: z.boolean().default(false),
 });
@@ -34,6 +35,7 @@ export const UpdateProfileSchema = z.object({
     providerKeys: z.partialRecord(ProviderSchema, z.string()).optional(),
     wallexApiKey: z.string().optional(),
     subAccountClientId: z.string().optional(),
+    tronscanApiKey: z.string().optional(),
     researchEndpoints: z.string().optional(),
     marketQuoteFallbacks: z.string().optional(),
   }).optional(),

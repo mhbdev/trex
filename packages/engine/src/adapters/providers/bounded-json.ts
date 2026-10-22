@@ -1,6 +1,6 @@
-/** Read and parse a JSON response with a hard byte limit. */
-export async function readJsonLimited<T = unknown>(response: Response, maxBytes: number): Promise<T> {
-  if (!response.body) return {} as T;
+/** Read a response body with a hard byte limit. */
+export async function readTextLimited(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) return "";
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -11,7 +11,7 @@ export async function readJsonLimited<T = unknown>(response: Response, maxBytes:
       total += value.byteLength;
       if (total > maxBytes) {
         await reader.cancel();
-        throw new Error(`JSON response exceeded the ${maxBytes}-byte limit.`);
+        throw new Error(`Response body exceeded the ${maxBytes}-byte limit.`);
       }
       chunks.push(value);
     }
@@ -19,5 +19,11 @@ export async function readJsonLimited<T = unknown>(response: Response, maxBytes:
   const bytes = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  return JSON.parse(new TextDecoder().decode(bytes)) as T;
+  return new TextDecoder().decode(bytes);
+}
+
+/** Read and parse a JSON response with a hard byte limit. */
+export async function readJsonLimited<T = unknown>(response: Response, maxBytes: number): Promise<T> {
+  const text = await readTextLimited(response, maxBytes);
+  return JSON.parse(text.replace(/^\uFEFF/, "")) as T;
 }

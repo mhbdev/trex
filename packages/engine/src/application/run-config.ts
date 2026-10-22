@@ -34,7 +34,11 @@ export function runConfigSnapshot(config: EngineConfig, mode: EngineMode, symbol
       disabledRoles: [...config.ai.disabledRoles],
       timeoutMs: config.ai.timeoutMs,
     },
-    researchProviders: configuredIds(config.researchEndpoints),
+    researchProviders: [
+      ...(config.research.redditEnabled ? ["reddit-public-search"] : []),
+      ...(config.research.stocktwitsEnabled ? ["stocktwits-public-stream"] : []),
+      ...configuredIds(config.researchEndpoints),
+    ],
     quoteFallbackProviders: configuredIds(config.marketQuoteFallbacks),
     risk: { ...config.risk },
     debate: {

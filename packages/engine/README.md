@@ -50,7 +50,7 @@ flowchart LR
   modelPort --> aiAdapter["AI SDK model adapter"]
   marketPort --> wallexMarket["Wallex REST market adapter"]
   marketPort -. optional live updates .-> stream["Wallex Centrifugo v2 stream"]
-  researchPort --> sources["Configured research providers"]
+  researchPort --> sources["Native public sentiment and configured research feeds"]
   executionPort --> wallexOrders["Wallex order adapter"]
   repositoryPort --> sqlite["Drizzle and Bun SQLite"]
 ~~~
@@ -80,7 +80,9 @@ A decision context includes:
 
 Live and shadow decisions reject stale or future-dated quotes before agents run. The deterministic risk gate repeats freshness checks when evaluating an order. Live execution requires a canonical Wallex price. Context providers are supplemental; they do not replace the exchange quote for live authorization.
 
-The hybrid research aggregator calls configured providers concurrently. It validates response schemas, discards stale and future-dated items, deduplicates by an explicit key or by category, source, and title, limits context to five items per category, and returns provider failures as warnings. A failed optional source does not automatically discard successful sources. The warning and accepted source items are persisted for audit.
+The hybrid research aggregator calls enabled providers concurrently. It validates response schemas, discards stale and future-dated items, deduplicates by an explicit key or by category, source, and title, limits context to five items per category, and returns provider failures as warnings. A failed optional source does not automatically discard successful sources. The warning and accepted source items are persisted for audit.
+
+The profile defaults enable a public Reddit RSS search for recent crypto-community discussion; it requires no key and queries the analyzed asset symbol. StockTwits' public symbol stream is available as an optional profile source, but is disabled by default because access varies by network and rate limits. These feeds contain user opinions, not verified market facts. Agent prompts label external research as untrusted data and tell agents to ignore instructions inside it. The source URL, observation time, and evidence are recorded for review. Neither source is queried during historical backtests; live social data cannot be replayed safely at an earlier candle time.
 
 The AI model adapter uses the AI SDK provider registry and supports OpenAI, Anthropic, Google, OpenAI-compatible endpoints, BoxAPI, and Liara. A default provider/model can be configured, with provider/model routing per agent role. Provider-specific options are applied by the adapter rather than mixed into domain workflows.
 

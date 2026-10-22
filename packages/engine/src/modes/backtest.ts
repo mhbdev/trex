@@ -71,9 +71,13 @@ export async function runBacktest(input: BacktestInput, config: EngineConfig, ma
   if (!resumed) repository.createRun({ id: runId, mode: "backtest", config: runConfig, startedAt });
   else portfolio.restore(resumed.portfolio);
   try {
+  workflow.beginPipeline(runId, symbol, "backtest");
+  workflow.setStage("preparation", "active");
   await workflow.initializeMarketPolicy("backtest");
+  workflow.setStage("preparation", "completed");
 
   let candles: Candle[];
+  workflow.setStage("market_data", "active");
   if (input.resume) {
     const stored = repository.loadSnapshot(runId, "backtest_dataset");
     if (!Array.isArray(stored)) throw new Error(`Run ${runId} is missing its stored historical candle dataset.`);
@@ -85,6 +89,7 @@ export async function runBacktest(input: BacktestInput, config: EngineConfig, ma
     repository.saveSnapshot({ runId, category: "backtest_dataset", source: "wallex-rest-udf-history", symbol, observedAt: now(), payload: candles });
   }
   if (candles.length < 2) throw new Error("Backtest requires at least two completed one-minute candles.");
+  workflow.setStage("market_data", "completed", `${candles.length} historical candles loaded`);
   const benchmarkSymbol = workflow.memoryBenchmarkFor(symbol);
   let benchmarkCandles: Candle[] = [];
   if (benchmarkSymbol === symbol) benchmarkCandles = candles;
@@ -133,20 +138,26 @@ export async function runBacktest(input: BacktestInput, config: EngineConfig, ma
     const decisionAt = dateForCandle(bar);
     portfolio.mark(new Map([[symbol, bar.close]]), decisionAt);
     const quote: MarketQuote = { symbol, price: bar.close, observedAt: decisionAt, source: "wallex-historical-1m-close" };
+    workflow.setStage("market_data", "active", `Historical candle ${index + 1} of ${candles.length - 1}`);
+    workflow.setStage("market_data", "completed", `Historical candle ${index + 1} of ${candles.length - 1} ready`);
     const decision = repository.getDecisionAt(runId, symbol, decisionAt) ?? await workflow.evaluate({
         runId, symbol, portfolio: portfolio.current(), now: decisionAt, quote,
         candles: candles.slice(Math.max(0, index - 119), index + 1), research: [],
         memoryHistory,
         mode: "backtest", ...(input.strategy ? { strategy: input.strategy } : {}),
       });
+    workflow.setStage("outcome", "active", `Processing the ${decision.proposal.action} decision for historical candle ${index + 1}`);
 
     if (decision.risk.approved && decision.proposal.order) {
       acceptedProposals++;
+      workflow.setStage("final_gate", "active", "Rechecking the proposal against the next completed bar");
       const executionAt = nextBar.timestamp;
       const executionQuote: MarketQuote = { symbol, price: nextBar.open, observedAt: executionAt, source: "wallex-historical-next-bar-open" };
       const executionRisk = await workflow.riskAtExecution(decision, portfolio.current(), executionQuote, executionAt, "backtest", undefined, input.strategy);
       repository.saveRiskOutcome(decision.id, executionRisk);
+      workflow.setStage("final_gate", "completed", executionRisk.approved ? "Historical next-bar risk recheck passed" : "Historical next-bar risk recheck blocked the proposal");
       if (executionRisk.approved && executionRisk.normalizedOrder) {
+        workflow.setStage("outcome", "active", "Simulating the fill at the next bar open");
         const clientOrderId = decision.orderClientId ?? newWallexClientOrderId();
         const orderProposal = executionRisk.normalizedOrder;
         const simulated = simulateNextBarOpenFill({
@@ -167,6 +178,7 @@ export async function runBacktest(input: BacktestInput, config: EngineConfig, ma
         decision.orderClientId = clientOrderId;
       }
     }
+    if (!decision.proposal.order) workflow.setStage("outcome", "completed", `Decision ${decision.proposal.action}; no fill was simulated for this candle`);
     const state = portfolio.current();
     appendEquityPoint(equityCurve, state.observedAt, state.equity);
     repository.savePortfolio(runId, state);
@@ -181,6 +193,7 @@ export async function runBacktest(input: BacktestInput, config: EngineConfig, ma
   equityPath.push(finalState.equity);
   appendEquityPoint(equityCurve, finalState.observedAt, finalState.equity);
   repository.savePortfolio(runId, finalState);
+  workflow.setStage("outcome", "active", "Preparing the final performance report");
   const report = buildRunReport({
     runId, mode: "backtest", startedAt, initialEquity, finalEquity: finalState.equity, equityPath,
     acceptedProposals, orders, fees: formatFeesByAsset(orders.flatMap((order) => order.fills)), slippage: slippage.toFixed(),
@@ -189,6 +202,7 @@ export async function runBacktest(input: BacktestInput, config: EngineConfig, ma
     assumptions: ["Market decisions use completed Wallex 1-minute bars only.", "External news, sentiment, tokenomics, and on-chain feeds are not replayed historically because current feeds would introduce lookahead bias.", "Simulated fills occur at the next bar open at earliest.", `Fee: ${config.backtestFeeBps} bps; slippage: ${config.backtestSlippageBps} bps.`, "Historical candles do not reproduce historical order-book depth or queue position."],
   }, now());
   repository.finishRun(runId, report.endedAt, "completed", report as unknown as Record<string, unknown>);
+  workflow.setStage("outcome", "completed", "Backtest report and final portfolio recorded");
   return report;
   } catch (error) {
     repository.finishRun(runId, now(), "failed", undefined, auditFailure(error));

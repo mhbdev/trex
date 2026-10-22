@@ -46,6 +46,8 @@ export async function runLiveCycle(symbol: string, config: EngineConfig, marketD
     repository.failInterruptedRuns("live", startedAt);
     repository.createRun({ id: runId, mode: "live", config: runConfigSnapshot(config, "live", symbol, strategy), startedAt });
     runCreated = true;
+    workflow.beginPipeline(runId, symbol, "live");
+    workflow.setStage("preparation", "active");
     await workflow.initializeMarketPolicy("live");
     leaseGuard.assertHeld();
     const reconciliation = await coordinator.reconcilePending();
@@ -55,15 +57,20 @@ export async function runLiveCycle(symbol: string, config: EngineConfig, marketD
     const exchangePortfolio = await marketData.getAccountPortfolio!();
     const previousPortfolio = repository.getLatestPortfolio("live");
     initial = applyAccountRiskHistory(exchangePortfolio, previousPortfolio ?? exchangePortfolio);
+    workflow.setStage("preparation", "completed");
+    workflow.setStage("market_data", "active");
     const quote = await marketData.getQuote(symbol);
     const candleWindowEnd = now();
     const candles = await marketData.getCandles(symbol, Math.floor((candleWindowEnd - 120 * 60_000) / 1000), Math.floor(candleWindowEnd / 1000), 1);
+    workflow.setStage("market_data", "completed", `${candles.filter((candle) => candle.complete).length} completed candles loaded`);
     const decisionAt = now();
     const decision = await workflow.evaluate({ runId, symbol, portfolio: initial, quote, candles, now: decisionAt, mode: "live", strategy });
+    workflow.setStage("outcome", "active", `Handling the ${decision.proposal.action} decision and recording its result`);
     leaseGuard.assertHeld();
     let order: ExchangeOrder | undefined;
     let executionReferencePrice: string | undefined;
     if (decision.risk.approved && decision.proposal.order) {
+      workflow.setStage("final_gate", "active", "Rechecking account, quote and limits immediately before execution");
       const latestAccount = await marketData.getAccountPortfolio!();
       const executionPortfolio = applyAccountRiskHistory(latestAccount, initial);
       const latestQuote = await marketData.getQuote(symbol);
@@ -71,9 +78,11 @@ export async function runLiveCycle(symbol: string, config: EngineConfig, marketD
       const executionRisk = await workflow.riskAtExecution(decision, executionPortfolio, latestQuote, now(), "live", undefined, strategy);
       repository.saveRiskOutcome(decision.id, executionRisk);
       decision.risk = executionRisk;
+      workflow.setStage("final_gate", "completed", executionRisk.approved ? "Final risk recheck passed" : "Final risk recheck blocked the proposal");
       if (executionRisk.approved) {
         if (shouldStop()) throw new Error("Live cycle stopped before order submission; no order was sent.");
         leaseGuard.assertHeld();
+        workflow.setStage("outcome", "active", "Submitting the approved order and reconciling its exchange result");
         order = await coordinator.execute(decision, latestQuote);
       }
     }
@@ -97,6 +106,7 @@ export async function runLiveCycle(symbol: string, config: EngineConfig, marketD
       equityCurve: [{ timestamp: startedAt, equity: initial.equity }, { timestamp: finalPortfolio.observedAt, equity: finalPortfolio.equity }],
     }, now());
     repository.finishRun(runId, report.endedAt, "completed", report as unknown as Record<string, unknown>);
+    workflow.setStage("outcome", "completed", order ? "Order outcome and run report recorded" : `Decision ${decision.proposal.action}; no order was sent. Run report recorded.`);
     return { report, decision, order };
   } catch (error) {
     if (runCreated) repository.finishRun(runId, now(), "failed", undefined, auditFailure(error));

@@ -17,6 +17,10 @@ type Props = {
 };
 
 const providers = ["openai", "anthropic", "google", "compatible", "boxapi", "liara"];
+function providerTitle(provider: string, fa: boolean) {
+  if (provider === "compatible") return fa ? "سرویس سازگار با OpenAI" : "OpenAI-compatible service";
+  return provider === "boxapi" ? "BoxAPI" : provider === "liara" ? "Liara" : provider[0]!.toUpperCase() + provider.slice(1);
+}
 
 function toRecord<T>(value: unknown): AgentMap<T> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as AgentMap<T> : {};
@@ -59,20 +63,20 @@ function AgentCard({
   const enabledLocked = locked.AI_DISABLED_AGENTS_JSON;
   const stepsLocked = locked.AI_ROLE_MAX_TOOL_STEPS_JSON;
   const strings = fa ? {
-    defaultRoute: "مدل پیش‌فرض پروفایل", customRoute: "مدل اختصاصی", required: "ضروری برای گردش‌کار",
-    optional: "اختیاری", active: "فعال", inactive: "غیرفعال", provider: "ارائه‌دهنده", model: "شناسه دقیق مدل",
-    remit: "مسئولیت پیش‌فرض", instructions: "دستور تکمیلی عامل", instructionsHelp: "این متن به مأموریت پیش‌فرض اضافه می‌شود و آن را جایگزین نمی‌کند. محدودیت‌های ایمنی موتور همچنان لازم‌الاجرا هستند. این دستور در تنظیمات اجرا ذخیره می‌شود؛ کلید API یا اطلاعات محرمانه را وارد نکنید.",
+    defaultRoute: "مدل پیش‌فرض پروفایل", customRoute: "مدل اختصاصی", required: "باید فعال بماند",
+    optional: "اختیاری", active: "فعال", inactive: "غیرفعال", provider: "سرویس هوش مصنوعی", model: "شناسه دقیق مدل",
+    remit: "وظیفهٔ اصلی", instructions: "راهنمای تکمیلی", instructionsHelp: "این راهنما به وظیفهٔ اصلی این دستیار اضافه می‌شود و جای آن را نمی‌گیرد. محدودیت‌های ریسک همچنان برقرارند. متن راهنما در گزارش اجرا ثبت می‌شود؛ کلید دسترسی یا اطلاعات محرمانه را اینجا ننویسید.",
     instructionsPlaceholder: "مثال: فقط به شواهد دو ساعت اخیر وزن بده و اختلاف قیمت را صریح ذکر کن…",
-    steps: "حداکثر گام ابزار", noTools: "این نقش از ابزار پژوهش استفاده نمی‌کند.", reset: "بازنشانی تنظیمات این عامل",
-    enabledHelp: "با غیرفعال‌کردن، این نقش از چرخه‌های جدید حذف می‌شود. پژوهش تکنیکال، مناظره صعودی/نزولی، معامله‌گر، هیئت ریسک و مدیر پرتفوی برای حفظ ایمنی و انسجام گردش‌کار موتور قابل غیرفعال‌سازی نیستند.",
-    routeHelp: "مدلی که این نقش در این پروفایل استفاده می‌کند. اگر مدل اختصاصی ثبت نشود، مدل پیش‌فرض پروفایل به کار می‌رود.",
-    providerHelp: "ارائه‌دهنده‌ای که برای فراخوانی این عامل استفاده می‌شود. کلید معتبر همان ارائه‌دهنده باید در تنظیمات اعتبارنامه‌ها موجود باشد.",
-    modelHelp: "شناسه دقیق مدل در همان ارائه‌دهنده؛ نام مدل میان ارائه‌دهندگان قابل جایگزینی خودکار نیست.",
-    stepsHelp: "حداکثر دور فراخوانی ابزارهای فقط‌خواندنی برای این نقش، از ۱ تا ۸. گام بیشتر می‌تواند داده بیشتری بررسی کند و مصرف/زمان را افزایش دهد.",
+    steps: "دفعات بررسی منابع", noTools: "این دستیار منبع پژوهشی جداگانه‌ای نمی‌خواند.", reset: "بازگرداندن تنظیمات این دستیار",
+    enabledHelp: "با خاموش‌کردن، این دستیار در اجراهای بعدی شرکت نمی‌کند. دستیارهای اصلی تحلیل بازار، بررسی ریسک و تصمیم نهایی همیشه فعال می‌مانند.",
+    routeHelp: "مدلی که این دستیار در این پروفایل به کار می‌برد. اگر مدل جداگانه‌ای انتخاب نکنید، از مدل پیش‌فرض استفاده می‌شود.",
+    providerHelp: "سرویسی که پاسخ‌های این دستیار را تولید می‌کند. کلید دسترسی همان سرویس باید در بخش کلیدهای دسترسی ثبت شده باشد.",
+    modelHelp: "شناسهٔ دقیق مدل در سرویس انتخاب‌شده؛ این نام را از همان سرویس بردارید.",
+    stepsHelp: "حداکثر تعداد درخواست‌هایی که این دستیار می‌تواند برای بررسی قیمت، دادهٔ بازار یا منابع پژوهشی بفرستد؛ از ۱ تا ۸. تعداد بیشتر ممکن است زمان و هزینه را بالا ببرد.",
   } : {
     defaultRoute: "Profile default model", customRoute: "Dedicated model", required: "Required by workflow",
-    optional: "Optional", active: "Active", inactive: "Off", provider: "Provider", model: "Exact model ID",
-    remit: "Default remit", instructions: "Additional agent instructions", instructionsHelp: "This text supplements the built-in remit; it does not replace it. Engine safety constraints still apply. Instructions are saved with run configuration snapshots, so do not enter API keys or other secrets.",
+    optional: "Optional", active: "Active", inactive: "Off", provider: "AI service", model: "Exact model ID",
+    remit: "Main responsibility", instructions: "Additional guidance", instructionsHelp: "This guidance supplements the agent’s main responsibility; it does not replace it. Risk limits still apply. Guidance is recorded in run reports, so never enter credentials or other secrets here.",
     instructionsPlaceholder: "Example: prioritize evidence from the last two hours and call out spread changes…",
     steps: "Maximum tool steps", noTools: "This role does not use research tools.", reset: "Reset this agent",
     enabledHelp: "Disabling removes this role from new runs. Technical analysis, bull/bear debate, trader, risk reviewers, and portfolio manager remain required for safety and workflow consistency.",
@@ -83,15 +87,15 @@ function AgentCard({
   };
   const routeHelp = strings.routeHelp;
   return <details className={`agent-card ${enabled ? "" : "is-disabled"}`} open={agent.role === "market_technical_analyst"}>
-    <summary className="agent-card-summary" aria-label={`${agent.name[locale]} · ${agentStageTitle(agent.stage, locale)} · ${route.provider}:${route.model}`}>
+    <summary className="agent-card-summary" aria-label={`${agent.name[locale]} · ${agentStageTitle(agent.stage, locale)} · ${providerTitle(route.provider, fa)} · ${route.override ? strings.customRoute : strings.defaultRoute}`}>
       <span className="agent-icon"><Icon size={18} strokeWidth={1.8} aria-hidden="true" /></span>
-      <span className="agent-summary-copy"><b>{agent.name[locale]}</b><small>{agentStageTitle(agent.stage, locale)} · <span dir="ltr">{route.provider}:{route.model}</span></small></span>
+      <span className="agent-summary-copy"><b>{agent.name[locale]}</b><small>{agentStageTitle(agent.stage, locale)} · {providerTitle(route.provider, fa)} · {route.override ? strings.customRoute : strings.defaultRoute}</small></span>
       <span className={`status ${agent.required ? "status-pass" : enabled ? "status-running" : "status-neutral"}`}>{agent.required ? strings.required : enabled ? strings.active : strings.inactive}</span>
       <ChevronDown className="agent-card-chevron" size={16} aria-hidden="true" />
     </summary>
     <div className="agent-card-content">
     <div className="agent-card-top">
-      <small className="technical-id" dir="ltr">{agent.role}</small>
+      {fa ? <details className="agent-technical-id"><summary>شناسهٔ فنی</summary><code dir="ltr">{agent.role}</code></details> : <small className="technical-id" dir="ltr">{agent.role}</small>}
       {agent.required
         ? <span className="agent-required-note"><ShieldCheck size={12} aria-hidden="true" />{strings.required}</span>
         : <label className="agent-enable-toggle">
@@ -105,7 +109,7 @@ function AgentCard({
     <div className="agent-route-grid">
       <div className="agent-field">
         <span className="agent-field-label"><FieldLabelInfo label={strings.provider} help={strings.providerHelp} /> <InfoTooltip label={strings.provider} help={routeHelp} /></span>
-        <AppSelect ariaLabel={`${agent.name[locale]} · ${strings.provider}`} value={route.provider} locale={locale} disabled={routeLocked} onValueChange={(provider) => onRoute(provider, provider === route.provider ? route.model : "")} options={providers.map((provider) => ({ value: provider, label: provider }))} />
+        <AppSelect ariaLabel={`${agent.name[locale]} · ${strings.provider}`} value={route.provider} locale={locale} disabled={routeLocked} onValueChange={(provider) => onRoute(provider, provider === route.provider ? route.model : "")} options={providers.map((provider) => ({ value: provider, label: providerTitle(provider, fa) }))} />
       </div>
       <label className="agent-field">
         <FieldLabelInfo label={strings.model} help={strings.modelHelp} />
@@ -114,7 +118,7 @@ function AgentCard({
     </div>
     <div className="agent-route-status">
       <span className={`status ${route.override ? "status-running" : "status-neutral"}`}>{route.override ? strings.customRoute : strings.defaultRoute}</span>
-      {agent.tools ? <label className="agent-steps"><FieldLabelInfo label={strings.steps} help={strings.stepsHelp} /><AppSelect ariaLabel={`${agent.name[locale]} · ${strings.steps}`} value={String(maxToolSteps)} locale={locale} disabled={stepsLocked} onValueChange={(value) => onSteps(Number(value))} options={Array.from({ length: 8 }, (_, index) => ({ value: String(index + 1), label: String(index + 1) }))} /></label> : <small className="muted">{strings.noTools}</small>}
+      {agent.tools ? <label className="agent-steps"><FieldLabelInfo label={strings.steps} help={strings.stepsHelp} /><AppSelect ariaLabel={`${agent.name[locale]} · ${strings.steps}`} value={String(maxToolSteps)} locale={locale} disabled={stepsLocked} onValueChange={(value) => onSteps(Number(value))} options={Array.from({ length: 8 }, (_, index) => ({ value: String(index + 1), label: new Intl.NumberFormat(fa ? "fa-IR" : "en-US").format(index + 1) }))} /></label> : <small className="muted">{strings.noTools}</small>}
     </div>
     <details className="agent-instructions">
       <summary><Sparkles size={14} aria-hidden="true" />{strings.instructions}<span className="count-pill">{instructions.length}/2000</span></summary>
@@ -164,14 +168,14 @@ export function AgentWorkspace({ profileId, config, fields, locale, notify, onRe
   const initialDisabled = strings(ai.disabledRoles);
   const dirty = JSON.stringify(routes) !== JSON.stringify(initialRoutes) || JSON.stringify(instructions) !== JSON.stringify(initialInstructions) || JSON.stringify(steps) !== JSON.stringify(initialSteps) || JSON.stringify([...disabledRoles].sort()) !== JSON.stringify([...initialDisabled].sort());
   const inputTexts = fa ? {
-    summary: "ترکیب عامل‌ها", summaryDetail: "نقش‌های تحلیل، مناظره، ارزیابی ریسک و مدیریت پرتفوی را با مسیر مدل و دستورهای اختصاصی هر پروفایل تنظیم کنید.",
-    flowTitle: "گردش‌کار عامل‌ها", flowDescription: "۷ مرحله برای تحلیل موازی، مناظره، بررسی ریسک و ثبت تصمیم؛ عامل‌ها سفارش صرافی ارسال نمی‌کنند.",
-    flow: ["تحلیل موازی", "مناظره صعودی / نزولی", "مدیر پژوهش", "پیشنهاد معامله‌گر", "هیئت ریسک", "تصمیم مدیر پرتفوی", "بازتاب پس از بلوغ حافظه"],
-    active: "فعال در هر اجرا", roles: "نقش عامل", search: "جست‌وجوی نقش یا تخصص", allStages: "همه مراحل", stage: "مرحله کاری",
-    save: "ذخیره تیم عامل‌ها", saved: "تنظیمات تیم عامل‌ها ذخیره شد.", saveError: "ذخیره تنظیمات عامل‌ها ناموفق بود.", discard: "لغو تغییرات", dirty: "تغییرات ذخیره‌نشده", clean: "همگام با پروفایل",
-    safetyTitle: "مرزهای ایمنی موتور حفظ می‌شوند", safetyBody: "دستور تکمیلی فقط نقش و اولویت‌های تحلیل را تنظیم می‌کند. سقف‌ها، کنترل ریسک، اعتبارسنجی بازار و مجوز ارسال سفارش مستقل و قطعی باقی می‌مانند.",
+    summary: "دستیارهای تحلیلی", summaryDetail: "دستیارهای تحلیل، بررسی ریسک و مدیریت سبد دارایی را برای هر پروفایل تنظیم کنید و برای هرکدام مدل و راهنمای جداگانه برگزینید.",
+    flowTitle: "مراحل تحلیل و تصمیم‌گیری", flowDescription: "۷ مرحله برای گردآوری داده، بررسی دیدگاه‌های مختلف، سنجش ریسک و ثبت تصمیم؛ دستیارها سفارش صرافی ارسال نمی‌کنند.",
+    flow: ["بررسی هم‌زمان بازار", "بررسی احتمال رشد یا افت قیمت", "جمع‌بندی تحلیل‌ها", "پیشنهاد معامله", "بررسی ریسک", "تصمیم نهایی", "ارزیابی نتیجه در آینده"],
+    active: "دستیار فعال", roles: "دستیار", search: "جست‌وجو بر اساس نقش یا تخصص", allStages: "همهٔ مراحل", stage: "مرحلهٔ کار",
+    save: "ذخیره تنظیمات دستیارها", saved: "تنظیمات دستیارها ذخیره شد.", saveError: "ذخیره تنظیمات دستیارها ناموفق بود.", discard: "لغو تغییرات", dirty: "تغییرات ذخیره‌نشده", clean: "همگام با پروفایل",
+    safetyTitle: "محدودیت‌های ایمنی همیشه برقرارند", safetyBody: "راهنمای هر دستیار بر تحلیل آن اثر می‌گذارد، اما نمی‌تواند سقف سرمایه، فهرست بازارهای مجاز یا بررسی ریسک را تغییر دهد و به‌تنهایی سفارشی ارسال نمی‌کند.",
     envTitle: "برخی تنظیم‌ها برای این پروفایل قابل ویرایش نیستند", envBody: "برای تغییر آن‌ها، پروفایلی را انتخاب کنید که مالک تنظیمات باشد یا به صفحه پروفایل و تنظیمات بروید.",
-    teamDefault: "مدل پیش‌فرض پروفایل", resetTitle: "تنظیمات هر عامل جداگانه قابل بازنشانی است.",
+    teamDefault: "مدل پیش‌فرض پروفایل", resetTitle: "می‌توانید تنظیمات هر دستیار را جداگانه به حالت پیش‌فرض برگردانید.",
   } : {
     summary: "Agent team", summaryDetail: "Configure research, debate, risk review, and portfolio roles with per-profile model routes and role guidance.",
     flowTitle: "Agent workflow", flowDescription: "Seven stages for parallel research, debate, risk review, and recorded decisions. Agents cannot submit exchange orders.",
@@ -215,7 +219,7 @@ export function AgentWorkspace({ profileId, config, fields, locale, notify, onRe
     if (!locked.AI_ROLE_MAX_TOOL_STEPS_JSON) settings.AI_ROLE_MAX_TOOL_STEPS_JSON = JSON.stringify(steps);
     if (!locked.AI_DISABLED_AGENTS_JSON) settings.AI_DISABLED_AGENTS_JSON = JSON.stringify([...new Set(disabledRoles)].sort());
     if (Object.keys(settings).length === 0) {
-      notify(fa ? "همه تنظیم‌های عامل در این پروفایل فقط‌خواندنی هستند." : "All agent settings are read-only for this profile.");
+      notify(fa ? "تنظیم‌های دستیارها در این پروفایل قابل ویرایش نیستند." : "All agent settings are read-only for this profile.");
       return;
     }
     setSaving(true);
@@ -224,7 +228,7 @@ export function AgentWorkspace({ profileId, config, fields, locale, notify, onRe
       onRefresh();
       notify(inputTexts.saved);
     } catch (error) {
-      notify(error instanceof Error ? error.message : inputTexts.saveError);
+      notify(inputTexts.saveError);
     } finally { setSaving(false); }
   };
   const discard = () => {
@@ -238,7 +242,7 @@ export function AgentWorkspace({ profileId, config, fields, locale, notify, onRe
     <section className="agent-overview" aria-label={inputTexts.summary}>
       <div className="agent-overview-mark"><Workflow size={20} aria-hidden="true" /></div>
       <div className="agent-overview-copy"><h2>{inputTexts.summary}</h2><p>{inputTexts.summaryDetail}</p></div>
-      <div className="agent-overview-meta"><span className="count-pill">{selectedCount}/{agentDefinitions.length} {inputTexts.active}</span><span className="agent-default-model"><span>{inputTexts.teamDefault}</span><code dir="ltr">{fallback}</code></span></div>
+      <div className="agent-overview-meta"><span className="count-pill">{new Intl.NumberFormat(fa ? "fa-IR" : "en-US").format(selectedCount)} / {new Intl.NumberFormat(fa ? "fa-IR" : "en-US").format(agentDefinitions.length)} {inputTexts.active}</span><span className="agent-default-model"><span>{inputTexts.teamDefault}</span><code dir="ltr">{fallback}</code></span></div>
     </section>
 
     <details className="agent-flow card" aria-labelledby="agent-flow-title">
@@ -251,14 +255,14 @@ export function AgentWorkspace({ profileId, config, fields, locale, notify, onRe
 
     <div className="agent-toolbar">
       <div className="field-search"><Search size={15} aria-hidden="true" /><input aria-label={inputTexts.search} placeholder={inputTexts.search} value={search} onChange={(event) => setSearch(event.target.value)} /></div>
-      <div className="agent-stage-filter"><FieldLabelInfo label={inputTexts.stage} help={fa ? "فهرست را بر اساس مرحله گردش‌کار عامل‌ها محدود می‌کند؛ هیچ نقشی حذف یا از اجرا غیرفعال نمی‌شود." : "Filters the visible roster by workflow stage. It does not disable or remove any role."} /><AppSelect ariaLabel={inputTexts.stage} value={stageFilter || "__trex_empty__"} locale={locale} onValueChange={setStageFilter} options={[{ value: "__trex_empty__", label: inputTexts.allStages }, ...agentStages.map((stage) => ({ value: stage, label: agentStageTitle(stage, locale) }))]} /></div>
+      <div className="agent-stage-filter"><FieldLabelInfo label={inputTexts.stage} help={fa ? "این گزینه فقط نمایش فهرست را محدود می‌کند و هیچ دستیار یا نقشی را خاموش نمی‌کند." : "Filters the visible roster by workflow stage. It does not disable or remove any role."} /><AppSelect ariaLabel={inputTexts.stage} value={stageFilter || "__trex_empty__"} locale={locale} onValueChange={setStageFilter} options={[{ value: "__trex_empty__", label: inputTexts.allStages }, ...agentStages.map((stage) => ({ value: stage, label: agentStageTitle(stage, locale) }))]} /></div>
       <span className={`agent-dirty-state ${dirty ? "dirty" : ""}`} role="status">{dirty ? inputTexts.dirty : inputTexts.clean}</span>
       {dirty && <button className="button secondary" type="button" onClick={discard} disabled={saving}>{inputTexts.discard}</button>}
       <button className="button primary" type="button" onClick={() => void save()} disabled={!dirty || saving || !routesValid}><Check size={15} aria-hidden="true" />{saving ? (fa ? "در حال ذخیره…" : "Saving…") : inputTexts.save}</button>
     </div>
     {!routesValid && <div className="notice warning agent-safety-note" role="alert"><CircleHelp size={17} aria-hidden="true" /><div><b>{fa ? "مسیر مدل نامعتبر است" : "A model route is incomplete"}</b><p>{fa ? `${invalidRoutes.map((agent) => agent.name.fa).join("، ")}: ارائه‌دهنده را انتخاب و شناسه مدل را بدون رفتن به خط بعد وارد کنید.` : `${invalidRoutes.map((agent) => agent.name.en).join(", ")}: select a provider and enter a model ID on a single line.`}</p></div></div>}
 
-    {grouped.length === 0 ? <div className="empty"><span className="empty-mark"><Search size={18} aria-hidden="true" /></span><p>{fa ? "عاملی با این جست‌وجو پیدا نشد." : "No agents match your search."}</p></div> : grouped.map(({ stage, agents }) => <section className="agent-stage-group" key={stage} aria-labelledby={`agents-${stage}`}>
+    {grouped.length === 0 ? <div className="empty"><span className="empty-mark"><Search size={18} aria-hidden="true" /></span><p>{fa ? "دستیار متناسب با این جست‌وجو پیدا نشد." : "No agents match your search."}</p></div> : grouped.map(({ stage, agents }) => <section className="agent-stage-group" key={stage} aria-labelledby={`agents-${stage}`}>
       <div className="agent-stage-heading"><h2 id={`agents-${stage}`}>{agentStageTitle(stage, locale)}</h2><span className="count-pill">{agents.length}</span><div /></div>
       <div className="agent-card-grid">{agents.map((agent) => {
         const configured = routes[agent.role];

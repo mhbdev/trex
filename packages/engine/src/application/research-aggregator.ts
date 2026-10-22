@@ -3,32 +3,58 @@ import type { ResearchAggregatorPort, ResearchProvider, ResearchBundle } from ".
 import { ResearchItemSchema } from "../domain/types.ts";
 import { readJsonLimited } from "../adapters/providers/bounded-json.ts";
 
+const MAX_RESEARCH_ITEMS_PER_CATEGORY = 10;
+
 export class HybridResearchAggregator implements ResearchAggregatorPort {
   constructor(private readonly providers: readonly ResearchProvider[]) {}
 
   async collect(symbol: string, now: number): Promise<ResearchBundle> {
-    const results = await Promise.allSettled(this.providers.map(async (provider) => ({
-      provider: provider.id,
-      items: await provider.fetch(symbol, provider.categories, now),
-    })));
+    const results = await Promise.allSettled(this.providers.map(async (provider) => {
+      const skipReason = provider.skipReason?.(symbol);
+      const items = skipReason ? [] : (await provider.fetch(symbol, provider.categories, now)).map((item) => ResearchItemSchema.parse(item));
+      return { provider: provider.id, skipReason, items };
+    }));
     const warnings: ResearchBundle["warnings"] = [];
+    const coverage: NonNullable<ResearchBundle["coverage"]> = [];
     const all = [];
+    const providerByItem = new Map<object, string>();
     for (let i = 0; i < results.length; i++) {
       const result = results[i]!;
       if (result.status === "fulfilled") {
         const provider = this.providers[i]!;
+        if (result.value.skipReason) {
+          coverage.push({ provider: provider.id, categories: [...provider.categories], status: "skipped", returnedItemCount: 0, acceptedItemCount: 0, includedItemCount: 0, excludedStaleCount: 0, excludedFutureCount: 0, message: result.value.skipReason });
+          continue;
+        }
         const maxAgeMs = (provider.maxAgeSeconds ?? 86_400) * 1000;
         let stale = 0;
         let future = 0;
+        let accepted = 0;
         for (const rawItem of result.value.items) {
-          const item = ResearchItemSchema.parse(rawItem);
+          const item = rawItem;
           if (item.observedAt > now + 60_000) { future++; continue; }
           if (now - item.observedAt > maxAgeMs) { stale++; continue; }
           all.push(item);
+          providerByItem.set(item, provider.id);
+          accepted++;
         }
+        coverage.push({
+          provider: provider.id, categories: [...provider.categories],
+          status: accepted > 0 ? "available" : result.value.items.length > 0 ? "filtered" : "no_matches",
+          returnedItemCount: result.value.items.length, acceptedItemCount: accepted, includedItemCount: 0,
+          excludedStaleCount: stale, excludedFutureCount: future,
+          ...(accepted === 0 ? { message: result.value.items.length > 0
+            ? "The provider returned items, but all were excluded as stale or future-dated. This does not establish that no event or activity exists."
+            : "The provider returned no matching evidence for this query. This does not establish that no event or activity exists." } : {}),
+        });
         if (stale > 0) warnings.push({ provider: provider.id, message: `${stale} stale research item(s) were excluded.` });
         if (future > 0) warnings.push({ provider: provider.id, message: `${future} future-dated research item(s) were excluded.` });
-      } else warnings.push({ provider: this.providers[i]!.id, message: result.reason instanceof Error ? result.reason.message : String(result.reason) });
+      } else {
+        const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        const provider = this.providers[i]!;
+        coverage.push({ provider: provider.id, categories: [...provider.categories], status: "failed", returnedItemCount: 0, acceptedItemCount: 0, includedItemCount: 0, excludedStaleCount: 0, excludedFutureCount: 0, message });
+        warnings.push({ provider: provider.id, message });
+      }
     }
     const newestByKey = new Map<string, (typeof all)[number]>();
     for (const item of all) {
@@ -42,12 +68,15 @@ export class HybridResearchAggregator implements ResearchAggregatorPort {
     let capped = 0;
     for (const item of [...newestByKey.values()].sort((a, b) => b.observedAt - a.observedAt)) {
       const count = categoryCounts.get(item.category) ?? 0;
-      if (count >= 5) { capped++; continue; }
+      if (count >= MAX_RESEARCH_ITEMS_PER_CATEGORY) { capped++; continue; }
       categoryCounts.set(item.category, count + 1);
       items.push(item);
+      const owner = providerByItem.get(item);
+      const sourceCoverage = owner ? coverage.find((entry) => entry.provider === owner) : undefined;
+      if (sourceCoverage) sourceCoverage.includedItemCount++;
     }
     if (capped > 0) warnings.push({ provider: "aggregator", message: `${capped} additional evidence item(s) were excluded by the per-category context limit.` });
-    return { items, warnings };
+    return { items, warnings, coverage };
   }
 }
 

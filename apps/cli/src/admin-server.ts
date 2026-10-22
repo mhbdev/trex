@@ -10,6 +10,7 @@ import {
   StartRunRequestSchema, StopRunRequestSchema, UpdateProfileSchema,
 } from "@trex/contracts/admin";
 import { SqliteRunRepository } from "@trex/engine/adapters/persistence/store";
+import type { WorkflowProgress } from "@trex/engine/application/ports";
 import { decryptProfileSecret, generateEncryptionKey, parseEncryptionKey, rotateProfileSecretEnvelopes } from "@trex/engine/adapters/security/secret-vault";
 import { ConfigurationProfileService } from "@trex/engine/application/configuration-profiles";
 import { ExecutionLeaseGuard } from "@trex/engine/application/execution-lease";
@@ -28,18 +29,19 @@ import { createLiveExecution, createRuntime, getDatabaseUrl, publicConfig } from
 type Mode = "backtest" | "shadow" | "live";
 type RunStatus = "starting" | "running" | "waiting" | "stopping" | "completed" | "failed" | "stopped";
 interface ManagedRun {
-  id: string; mode: Mode; profileId: string; state: RunStatus; message: string; startedAt: number; updatedAt: number;
-  symbols: string[]; strategyIds: string[]; error?: string; stopRequested: boolean; resumeRunId?: string;
+  id: string; mode: Mode; profileId: string; state: RunStatus; phase: "setup" | "engine"; message: string; startedAt: number; updatedAt: number;
+  symbols: string[]; strategyIds: string[]; error?: string; stopRequested: boolean; resumeRunId?: string; workflow?: WorkflowProgress;
 }
 
 const secretKeys = new Set([
-  "AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY",
+  "AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY", "TRONSCAN_API_KEY",
   "AI_PROVIDER_KEYS_JSON", "RESEARCH_ENDPOINTS_JSON", "MARKET_QUOTE_FALLBACKS_JSON", "ENCRYPTION_KEY",
 ]);
 const providerIds = ["openai", "anthropic", "google", "compatible", "boxapi", "liara"] as const;
 const RekeySecretsSchema = z.object({ previousKey: z.string().min(1), replacementKey: z.string().min(1) });
 const settingGroups: Record<string, string> = {
   AI_PROVIDER: "AI & agents", AI_MODEL: "AI & agents", AI_BASE_URL: "AI & agents", AI_REQUEST_TIMEOUT_SECONDS: "AI & agents",
+  AI_TOOL_TIMEOUT_SECONDS: "AI & agents", AI_TIMEOUT_RETRIES: "AI & agents",
   AI_ROLE_MODELS_JSON: "AI & agents", AI_PROVIDER_KEYS_JSON: "AI & agents", ENGINE_MAX_DEBATE_ROUNDS: "AI & agents",
   AI_ROLE_INSTRUCTIONS_JSON: "AI & agents", AI_ROLE_MAX_TOOL_STEPS_JSON: "AI & agents", AI_DISABLED_AGENTS_JSON: "AI & agents",
   ENGINE_MAX_RISK_DISCUSS_ROUNDS: "AI & agents", WALLEX_BASE_URL: "Wallex", WALLEX_WS_URL: "Wallex",
@@ -50,6 +52,8 @@ const settingGroups: Record<string, string> = {
   RISK_FEE_BUFFER_BPS: "Risk & safety", RISK_MAX_MARKET_SLIPPAGE_BPS: "Risk & safety", RISK_KILL_SWITCH: "Risk & safety",
   ENGINE_STRATEGIES_JSON: "Strategies", MEMORY_HOLDING_PERIOD_BARS: "Memory", MEMORY_BENCHMARK_SYMBOL: "Memory",
   PAPER_INITIAL_CASH: "Simulation", BACKTEST_FEE_BPS: "Simulation", BACKTEST_SLIPPAGE_BPS: "Simulation",
+  RESEARCH_REDDIT_ENABLED: "Data sources", RESEARCH_STOCKTWITS_ENABLED: "Data sources",
+  TRONSCAN_API_KEY: "Data sources",
   MARKET_QUOTE_FALLBACKS_JSON: "Data sources",
   LOG_LEVEL: "Advanced", ENGINE_MODE: "Advanced", BOXAPI_BASE_URL: "AI & agents", LIARA_BASE_URL: "AI & agents",
   LIARA_WORKSPACE_ID: "AI & agents",
@@ -63,7 +67,8 @@ function envValue(config: EngineConfig): Record<string, string> {
     WALLEX_ALLOWED_MARKETS: config.wallex.allowedMarkets.join(","), WALLEX_PACKAGE_ID: config.wallex.packageId ?? "",
     WALLEX_QUOTE_CURRENCY: config.wallex.quoteCurrency, LIVE_MAX_GROSS_EXPOSURE: config.wallex.liveMaxGrossExposure,
     AI_PROVIDER: config.ai.provider, AI_MODEL: config.ai.model, AI_BASE_URL: config.ai.baseUrl ?? "",
-    AI_REQUEST_TIMEOUT_SECONDS: String(config.ai.timeoutMs / 1000), AI_ROLE_MODELS_JSON: JSON.stringify(config.ai.roleModels, null, 2),
+    AI_REQUEST_TIMEOUT_SECONDS: String(config.ai.timeoutMs / 1000), AI_TOOL_TIMEOUT_SECONDS: String(config.ai.toolTimeoutMs / 1000),
+    AI_TIMEOUT_RETRIES: String(config.ai.timeoutRetries), AI_ROLE_MODELS_JSON: JSON.stringify(config.ai.roleModels, null, 2),
     AI_ROLE_INSTRUCTIONS_JSON: JSON.stringify(config.ai.roleInstructions, null, 2),
     AI_ROLE_MAX_TOOL_STEPS_JSON: JSON.stringify(config.ai.roleMaxToolSteps, null, 2),
     AI_DISABLED_AGENTS_JSON: JSON.stringify(config.ai.disabledRoles, null, 2),
@@ -72,6 +77,7 @@ function envValue(config: EngineConfig): Record<string, string> {
     ENGINE_STRATEGIES_JSON: JSON.stringify(config.strategies, null, 2),
     ENGINE_MAX_DEBATE_ROUNDS: String(config.maxDebateRounds), ENGINE_MAX_RISK_DISCUSS_ROUNDS: String(config.maxRiskDiscussRounds),
     MEMORY_HOLDING_PERIOD_BARS: String(config.memory.holdingPeriodBars), MEMORY_BENCHMARK_SYMBOL: config.memory.benchmarkSymbol ?? "",
+    RESEARCH_REDDIT_ENABLED: String(config.research.redditEnabled), RESEARCH_STOCKTWITS_ENABLED: String(config.research.stocktwitsEnabled),
     RESEARCH_ENDPOINTS_JSON: "[set using encrypted data-source settings]", MARKET_QUOTE_FALLBACKS_JSON: "[set using encrypted data-source settings]",
     PAPER_INITIAL_CASH: config.paperInitialCash, BACKTEST_FEE_BPS: config.backtestFeeBps, BACKTEST_SLIPPAGE_BPS: config.backtestSlippageBps,
     RISK_MAX_ORDER_NOTIONAL: config.risk.maxOrderNotional, RISK_MAX_POSITION_NOTIONAL: config.risk.maxPositionNotional,
@@ -129,9 +135,25 @@ function normalizeSymbols(values: readonly string[], config: EngineConfig): stri
 class RunManager {
   readonly runs = new Map<string, ManagedRun>();
   private readonly tasks = new Map<string, Promise<void>>();
-  constructor(private readonly profiles: ConfigurationProfileService) {}
+  constructor(private readonly profiles: ConfigurationProfileService, private readonly repository: SqliteRunRepository) {
+    repository.failInterruptedManagedRunAttempts(Date.now());
+  }
 
-  list(): ManagedRun[] { return [...this.runs.values()].sort((a, b) => b.startedAt - a.startedAt); }
+  list(): ManagedRun[] {
+    const all = new Map<string, ManagedRun>(this.repository.getRecentManagedRunAttempts(200).map((run) => [run.id, { ...run, stopRequested: false }]));
+    for (const run of this.runs.values()) all.set(run.id, run);
+    return [...all.values()].sort((a, b) => b.startedAt - a.startedAt);
+  }
+
+  private persist(run: ManagedRun): void {
+    this.repository.saveManagedRunAttempt({
+      id: run.id, mode: run.mode, profileId: run.profileId, state: run.state, phase: run.phase,
+      message: run.message, startedAt: run.startedAt, updatedAt: run.updatedAt,
+      symbols: run.symbols, strategyIds: run.strategyIds,
+      ...(run.error ? { error: safeMessage(run.error) } : {}),
+      ...(run.workflow ? { workflow: run.workflow } : {}),
+    });
+  }
 
   async start(body: unknown): Promise<ManagedRun> {
     const request = StartRunRequestSchema.parse(body);
@@ -139,10 +161,11 @@ class RunManager {
     const symbols = request.mode === "live" ? [request.symbol] : request.symbols;
     const strategyIds = request.mode === "live" ? [request.strategyId] : request.strategyIds;
     const run: ManagedRun = {
-      id: runId, mode: request.mode, profileId: request.profileId, state: "starting", message: "Validating the selected profile and run settings.",
+      id: runId, mode: request.mode, profileId: request.profileId, state: "starting", phase: "setup", message: "Validating the selected profile and run settings.",
       startedAt: Date.now(), updatedAt: Date.now(), symbols: [...symbols], strategyIds: [...strategyIds], stopRequested: false,
     };
     this.runs.set(run.id, run);
+    this.persist(run);
     this.launch(run, request);
     return run;
   }
@@ -154,10 +177,11 @@ class RunManager {
     const to = z.number().int().positive().parse(savedConfig.toSeconds);
     const request = StartRunRequestSchema.parse({ mode: "backtest", profileId, symbols: [symbol], strategyIds: [strategyId], from, to });
     const run: ManagedRun = {
-      id: randomUUID(), mode: "backtest", profileId, state: "starting", message: `Recovering checkpoint for ${runId}.`,
+      id: randomUUID(), mode: "backtest", profileId, state: "starting", phase: "setup", message: `Recovering checkpoint for ${runId}.`,
       startedAt: Date.now(), updatedAt: Date.now(), symbols: [symbol], strategyIds: [strategyId], stopRequested: false, resumeRunId: runId,
     };
     this.runs.set(run.id, run);
+    this.persist(run);
     this.launch(run, request);
     return run;
   }
@@ -170,6 +194,7 @@ class RunManager {
     run.state = "stopping";
     run.message = reason?.trim() || "Stop requested; completing the current safe operation.";
     run.updatedAt = Date.now();
+    this.persist(run);
     return run;
   }
 
@@ -184,8 +209,19 @@ class RunManager {
       run.state = run.stopRequested ? "stopped" : "failed";
       if (run.stopRequested) delete run.error;
       else run.error = safeMessage(error);
+      if (run.workflow) {
+        const currentStage = run.workflow.currentStage;
+        const stage = run.workflow.stages[currentStage];
+        if (stage?.status === "active") run.workflow.stages[currentStage] = {
+          ...stage, status: run.stopRequested ? "skipped" : "failed", updatedAt: Date.now(),
+          ...(!run.stopRequested ? { detail: safeMessage(error).slice(0, 240) } : {}),
+        };
+        run.workflow.activeAgents = [];
+        run.workflow.updatedAt = Date.now();
+      }
       run.message = run.stopRequested ? "Stopped safely. Backtest checkpoints are available for recovery." : "Run failed; inspect the audit and diagnostics for details.";
       run.updatedAt = Date.now();
+      this.persist(run);
     }).finally(() => { this.tasks.delete(run.id); });
     this.tasks.set(run.id, task);
   }
@@ -227,7 +263,12 @@ class RunManager {
     if (request.mode === "live" && (request.autoTrade && (symbols.length !== 1 || strategies.length !== 1))) throw new Error("Autonomous live trading is limited to one pair and one strategy per service.");
     const runtime = createRuntime(config);
     try {
-      run.state = "running"; run.message = request.mode === "live" ? "Live run is preparing its pre-trade checks." : `Running ${request.mode} for ${symbols.join(", ")}.`; run.updatedAt = Date.now();
+      runtime.workflow.setProgressListener((workflow) => {
+        run.workflow = workflow;
+        run.updatedAt = workflow.updatedAt;
+        this.persist(run);
+      });
+      run.state = "running"; run.phase = "engine"; run.message = request.mode === "live" ? "Live run is preparing its pre-trade checks." : `Running ${request.mode} for ${symbols.join(", ")}.`; run.updatedAt = Date.now(); this.persist(run);
       if (request.mode === "backtest") {
         const reports: RunReport[] = [];
         for (const symbol of symbols) for (const strategy of strategies) {
@@ -237,9 +278,11 @@ class RunManager {
             ...(candles ? { dataset: candles } : {}), ...(run.resumeRunId ? { runId: run.resumeRunId, resume: true } : {}),
             shouldStop: () => run.stopRequested }, config, runtime.marketData, runtime.workflow, runtime.repository));
           run.message = `Completed ${reports.length} of ${symbols.length * strategies.length} backtest cases.`; run.updatedAt = Date.now();
+          this.persist(run);
         }
         run.state = run.stopRequested ? "stopped" : "completed";
         run.message = run.stopRequested ? "Stopped safely; the most recent completed bar is checkpointed for recovery." : `${reports.length} backtest case(s) completed.`;
+        run.updatedAt = Date.now(); this.persist(run);
         return;
       }
       if (request.mode === "shadow") {
@@ -252,15 +295,18 @@ class RunManager {
             await runShadowCycle(symbol, config, runtime.marketData, runtime.workflow, runtime.repository, Date.now, strategy);
             completed++;
             run.message = `Completed ${completed} of ${symbols.length * strategies.length} shadow cycle(s).`; run.updatedAt = Date.now();
+            this.persist(run);
           }
           if (!shadow.watch || run.stopRequested) break;
           run.state = "waiting"; run.message = `Cycle complete. Next cycle in ${shadow.intervalSeconds} seconds.`; run.updatedAt = Date.now();
+          this.persist(run);
           await waitForStop(shadow.intervalSeconds * 1000, run);
-          run.state = "running";
+          run.state = "running"; run.updatedAt = Date.now(); this.persist(run);
         } while (!run.stopRequested);
         run.state = run.stopRequested ? "stopped" : "completed";
         if (!run.stopRequested) run.message = "Shadow run completed successfully.";
         run.updatedAt = Date.now();
+        this.persist(run);
         return;
       }
       const live = request as z.infer<typeof LiveRunRequestSchema>;
@@ -268,10 +314,12 @@ class RunManager {
         if (run.stopRequested) break;
         await runLiveCycle(symbols[0]!, config, runtime.marketData, createLiveExecution(config), runtime.workflow, runtime.repository, Date.now, () => run.stopRequested, strategies[0]);
         run.message = "Live cycle completed; no further order is submitted unless the next risk-gated proposal passes."; run.updatedAt = Date.now();
+        this.persist(run);
         if (!live.autoTrade || run.stopRequested) break;
         run.state = "waiting"; run.message = `Live cycle complete. Next evaluation in ${live.intervalSeconds} seconds.`; run.updatedAt = Date.now();
+        this.persist(run);
         await waitForStop(live.intervalSeconds * 1000, run);
-        run.state = "running";
+        run.state = "running"; run.updatedAt = Date.now(); this.persist(run);
       } while (!run.stopRequested);
     } finally {
       runtime.repository.close();
@@ -280,6 +328,7 @@ class RunManager {
     run.state = run.stopRequested ? "stopped" : "completed";
     if (run.state === "completed") run.message = "Run completed successfully.";
     run.updatedAt = Date.now();
+    this.persist(run);
   }
 }
 
@@ -310,6 +359,7 @@ function summarizeProfile(profile: ReturnType<ConfigurationProfileService["get"]
       aiApiKey: profile.secretState.aiApiKey,
       wallexApiKey: profile.secretState.wallexApiKey,
       subAccountClientId: profile.secretState.subAccountClientId,
+      tronscanApiKey: profile.secretState.tronscanApiKey,
       providerKeys: Object.fromEntries(providerIds.map((id) => [id, Boolean(profile.secretState.providerKeys[id])])),
       researchEndpoints: profile.secretState.researchEndpoints,
       marketQuoteFallbacks: profile.secretState.marketQuoteFallbacks,
@@ -398,7 +448,7 @@ export async function startAdminServer(options: { host?: string; port?: number; 
   repository.migrate();
   const profiles = new ConfigurationProfileService(repository, Date.now, () => ({}), () => parseEncryptionKey(environment.ENCRYPTION_KEY ?? ""), databaseUrl);
   profiles.list();
-  const runs = new RunManager(profiles);
+  const runs = new RunManager(profiles, repository);
   const token = randomUUID() + randomUUID();
   const allowedOrigins = new Set<string>();
   const dashboardOrigin = `http://127.0.0.1:${options.port ?? 4173}`;
@@ -486,6 +536,7 @@ export async function startAdminServer(options: { host?: string; port?: number; 
           if (input.secrets?.aiApiKey !== undefined) secrets.AI_API_KEY = input.secrets.aiApiKey;
           if (input.secrets?.wallexApiKey !== undefined) secrets.WALLEX_API_KEY = input.secrets.wallexApiKey;
           if (input.secrets?.subAccountClientId !== undefined) secrets.WALLEX_SUB_ACCOUNT_CLIENT_ID = input.secrets.subAccountClientId;
+          if (input.secrets?.tronscanApiKey !== undefined) secrets.TRONSCAN_API_KEY = input.secrets.tronscanApiKey;
           if (input.secrets?.researchEndpoints !== undefined) secrets.RESEARCH_ENDPOINTS_JSON = input.secrets.researchEndpoints;
           if (input.secrets?.marketQuoteFallbacks !== undefined) secrets.MARKET_QUOTE_FALLBACKS_JSON = input.secrets.marketQuoteFallbacks;
           for (const provider of providerIds) if (input.secrets?.providerKeys?.[provider] !== undefined) secrets[`AI_PROVIDER_KEY:${provider}`] = input.secrets.providerKeys[provider]!;

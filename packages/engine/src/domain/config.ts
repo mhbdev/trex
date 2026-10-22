@@ -64,8 +64,11 @@ const envSchema = z.object({
   BOXAPI_BASE_URL: httpsUrl.default("https://ai.boxapi.ir/ai/v1"),
   LIARA_API_KEY: z.string().optional(),
   LIARA_WORKSPACE_ID: z.string().optional(),
+  TRONSCAN_API_KEY: z.string().optional(),
   LIARA_BASE_URL: httpsUrl.default("https://ai.liara.ir"),
   AI_REQUEST_TIMEOUT_SECONDS: z.coerce.number().int().min(5).max(300).default(60),
+  AI_TOOL_TIMEOUT_SECONDS: z.coerce.number().int().min(1).max(120).default(15),
+  AI_TIMEOUT_RETRIES: z.coerce.number().int().min(0).max(2).default(1),
   AI_PROVIDER_KEYS_JSON: z.string().default("{}"),
   AI_ROLE_MODELS_JSON: z.string().default("{}"),
   AI_ROLE_INSTRUCTIONS_JSON: z.string().default("{}"),
@@ -76,6 +79,8 @@ const envSchema = z.object({
   ENGINE_MAX_RISK_DISCUSS_ROUNDS: z.coerce.number().int().min(1).max(10).default(1),
   MEMORY_HOLDING_PERIOD_BARS: z.coerce.number().int().min(1).max(100_000).default(7_200),
   MEMORY_BENCHMARK_SYMBOL: z.preprocess((value) => value === "" ? undefined : value, z.string().optional()),
+  RESEARCH_REDDIT_ENABLED: bool(true),
+  RESEARCH_STOCKTWITS_ENABLED: bool(false),
   RESEARCH_ENDPOINTS_JSON: z.preprocess((value) => value === "" ? undefined : value, z.string().optional()),
   MARKET_QUOTE_FALLBACKS_JSON: z.string().default("[]"),
   PAPER_INITIAL_CASH: z.string().regex(/^\d+(\.\d+)?$/).default("1000000"),
@@ -125,11 +130,14 @@ export interface EngineConfig {
     roleMaxToolSteps: Partial<Record<AgentRole, number>>;
     disabledRoles: AgentRole[];
     timeoutMs: number;
+    toolTimeoutMs: number;
+    timeoutRetries: number;
   };
   strategies: StrategyProfile[];
   maxDebateRounds: number;
   maxRiskDiscussRounds: number;
   memory: { holdingPeriodBars: number; benchmarkSymbol?: string };
+  research: { redditEnabled: boolean; stocktwitsEnabled: boolean; tronscanApiKey?: string };
   researchEndpoints: string;
   marketQuoteFallbacks: string;
   paperInitialCash: string;
@@ -236,6 +244,8 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>> = {
       roleMaxToolSteps,
       disabledRoles,
       timeoutMs: parsed.AI_REQUEST_TIMEOUT_SECONDS * 1000,
+      toolTimeoutMs: parsed.AI_TOOL_TIMEOUT_SECONDS * 1000,
+      timeoutRetries: parsed.AI_TIMEOUT_RETRIES,
     },
     strategies: parseStrategyProfiles(parsed.ENGINE_STRATEGIES_JSON),
     maxDebateRounds: parsed.ENGINE_MAX_DEBATE_ROUNDS,
@@ -243,6 +253,10 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>> = {
     memory: {
       holdingPeriodBars: parsed.MEMORY_HOLDING_PERIOD_BARS,
       ...(parsed.MEMORY_BENCHMARK_SYMBOL ? { benchmarkSymbol: normalizeMarketSymbol(parsed.MEMORY_BENCHMARK_SYMBOL) } : {}),
+    },
+    research: {
+      redditEnabled: parsed.RESEARCH_REDDIT_ENABLED, stocktwitsEnabled: parsed.RESEARCH_STOCKTWITS_ENABLED,
+      ...(parsed.TRONSCAN_API_KEY ? { tronscanApiKey: parsed.TRONSCAN_API_KEY } : {}),
     },
     researchEndpoints: parsed.RESEARCH_ENDPOINTS_JSON ?? "[]",
     marketQuoteFallbacks: parsed.MARKET_QUOTE_FALLBACKS_JSON,

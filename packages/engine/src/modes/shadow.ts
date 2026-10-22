@@ -100,7 +100,11 @@ export async function runShadowCycle(symbol: string, config: EngineConfig, marke
     const initialEquity = portfolio.current().equity;
     repository.createRun({ id: runId, mode: "shadow", config: runConfigSnapshot(config, "shadow", symbol, strategy), startedAt });
     runCreated = true;
+    workflow.beginPipeline(runId, symbol, "shadow");
+    workflow.setStage("preparation", "active");
     await workflow.initializeMarketPolicy("shadow");
+    workflow.setStage("preparation", "completed");
+    workflow.setStage("market_data", "active");
     const quote = await marketData.getQuote(symbol);
     const markQuotes = new Map<string, MarketQuote>([[symbol.toUpperCase(), quote]]);
     for (const position of portfolio.current().positions) {
@@ -116,21 +120,26 @@ export async function runShadowCycle(symbol: string, config: EngineConfig, marke
     portfolio.mark(marks, markAt);
     const candleWindowEnd = now();
     const candles = await marketData.getCandles(symbol, Math.floor((candleWindowEnd - 120 * 60_000) / 1000), Math.floor(candleWindowEnd / 1000), 1);
+    workflow.setStage("market_data", "completed", `${candles.filter((candle) => candle.complete).length} completed candles loaded`);
     const decisionAt = now();
     const decision = await workflow.evaluate({ runId, symbol, portfolio: portfolio.current(), quote, candles, now: decisionAt, mode: "shadow", strategy });
+    workflow.setStage("outcome", "active", `Handling the ${decision.proposal.action} decision and virtual portfolio`);
     leaseGuard.assertHeld();
     const orders: ExchangeOrder[] = [];
     let acceptedProposals = 0;
     let slippage = "0";
     if (decision.risk.approved && decision.proposal.order) {
       acceptedProposals++;
+      workflow.setStage("final_gate", "active", "Checking the latest quote and order book before virtual fill");
       const currentQuote: MarketQuote = await marketData.getQuote(symbol);
       const book = await marketData.getDepth(symbol);
       const currentRisk = await workflow.riskAtExecution(decision, portfolio.current(), currentQuote, now(), "shadow", book, strategy);
       repository.saveRiskOutcome(decision.id, currentRisk);
       decision.risk = currentRisk;
+      workflow.setStage("final_gate", "completed", currentRisk.approved ? "Final risk recheck passed" : "Final risk recheck blocked the proposal");
       if (currentRisk.approved && currentRisk.normalizedOrder) {
         leaseGuard.assertHeld();
+        workflow.setStage("outcome", "active", "Estimating a virtual fill from the visible order book");
         const clientOrderId = decision.orderClientId ?? newWallexClientOrderId();
         decision.orderClientId = clientOrderId;
         const filledAt = now();
@@ -166,6 +175,7 @@ export async function runShadowCycle(symbol: string, config: EngineConfig, marke
       equityCurve: [{ timestamp: startedAt, equity: initialEquity }, { timestamp: finalState.observedAt, equity: finalState.equity }],
     }, now());
     repository.finishRun(runId, report.endedAt, "completed", report as unknown as Record<string, unknown>);
+    workflow.setStage("outcome", "completed", orders.length > 0 ? "Virtual fill and report recorded" : `Decision ${decision.proposal.action}; no virtual order was filled. Report recorded.`);
     return { report, decision };
   } catch (error) {
     if (runCreated) repository.finishRun(runId, now(), "failed", undefined, auditFailure(error));

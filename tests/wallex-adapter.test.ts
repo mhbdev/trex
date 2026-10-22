@@ -4,6 +4,41 @@ import type { MarketDataPort } from "../packages/engine/src/application/ports.ts
 import type { Centrifuge } from "centrifuge";
 
 describe("Wallex adapters", () => {
+  test("retries a transient HTML 200 response for a read-only markets request", async () => {
+    let requests = 0;
+    const fetcher = (async () => {
+      requests++;
+      if (requests === 1) return new Response("<!doctype html><title>Temporary gateway issue</title>", { status: 200, headers: { "content-type": "text/html" } });
+      return Response.json({ success: true, result: { markets: [{ symbol: "BTCUSDT", base_asset: "BTC", quote_asset: "USDT", price: "100", is_spot: true }] } });
+    }) as unknown as typeof fetch;
+    const adapter = new WallexMarketDataAdapter({ baseUrl: "https://api.wallex.ir/", wsUrl: "wss://api.wallex.ir/connection/websocket", allowedMarkets: ["BTCUSDT"], fetcher });
+    const markets = await adapter.listSpotMarkets();
+    expect(requests).toBe(2);
+    expect(markets.map((market) => market.symbol)).toEqual(["BTCUSDT"]);
+  });
+
+  test("reports response format when every read-only markets response is non-JSON", async () => {
+    let requests = 0;
+    const fetcher = (async () => {
+      requests++;
+      return new Response("<!doctype html><title>Temporary gateway issue</title>", { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+    }) as unknown as typeof fetch;
+    const adapter = new WallexMarketDataAdapter({ baseUrl: "https://api.wallex.ir", wsUrl: "wss://api.wallex.ir/connection/websocket", allowedMarkets: [], fetcher });
+    await expect(adapter.listSpotMarkets()).rejects.toThrow("HTTP 200 for /hector/web/v1/markets (content-type: text/html; HTML page)");
+    expect(requests).toBe(3);
+  });
+
+  test("never retries an order submission after an ambiguous non-JSON response", async () => {
+    let requests = 0;
+    const fetcher = (async () => {
+      requests++;
+      return new Response("<!doctype html><title>Temporary gateway issue</title>", { status: 200, headers: { "content-type": "text/html" } });
+    }) as unknown as typeof fetch;
+    const adapter = new WallexOrderExecutionAdapter({ baseUrl: "https://api.wallex.ir", wsUrl: "wss://api.wallex.ir/connection/websocket", apiKey: "credit-key", allowedMarkets: ["BTCUSDT"], fetcher });
+    await expect(adapter.submitOrder({ symbol: "BTCUSDT", side: "BUY", type: "MARKET", quantity: "1" }, "WA_TEST")).rejects.toThrow("HTTP 200 for /v1/account/orders (content-type: text/html; HTML page)");
+    expect(requests).toBe(1);
+  });
+
   test("maps market metadata and excludes the still-forming one-minute candle", async () => {
     const now = 119_999;
     const fetcher = (async (input: URL | RequestInfo) => {
@@ -11,7 +46,7 @@ describe("Wallex adapters", () => {
       if (url.includes("/hector/web/v1/markets")) return Response.json({ success: true, result: { markets: [{ symbol: "BTCUSDT", base_asset: "BTC", quote_asset: "USDT", price: "100", price_precision: 2, amount_precision: 4, is_spot: true }] } });
       if (url.includes("/v1/udf/history")) return Response.json({ s: "ok", t: [0, 60], o: ["1", "2"], h: ["2", "3"], l: ["0.5", "1"], c: ["1.5", "2.5"], v: ["10", "20"] });
       throw new Error(`Unexpected URL ${url}`);
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     const adapter = new WallexMarketDataAdapter({ baseUrl: "https://api.wallex.ir", wsUrl: "wss://api.wallex.ir/connection/websocket", allowedMarkets: ["BTCUSDT"], fetcher, now: () => now });
     const markets = await adapter.listSpotMarkets();
     const candles = await adapter.getCandles("BTCUSDT", 0, 120, 1);
@@ -24,7 +59,7 @@ describe("Wallex adapters", () => {
     const fetcher = (async (input: URL | RequestInfo, init?: RequestInit) => {
       captured = { url: String(input), init: init ?? {} };
       return Response.json({ success: true, result: { active: true, clientOrderId: "WA_TEST", status: "NEW", symbol: "BTCUSDT", side: "BUY", origQty: "1", executedQty: "0", price: "100", fills: [] } }, { status: 201 });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     const adapter = new WallexOrderExecutionAdapter({ baseUrl: "https://api.wallex.ir", wsUrl: "wss://api.wallex.ir/connection/websocket", apiKey: "credit-key", subAccountClientId: "sub-account", allowedMarkets: ["BTCUSDT"], fetcher });
     const result = await adapter.submitOrder({ symbol: "BTCUSDT", side: "BUY", type: "MARKET", quantity: "1", price: "100" }, "WA_TEST");
     const headers = new Headers(captured?.init.headers);
@@ -41,7 +76,7 @@ describe("Wallex adapters", () => {
     const fetcher = (async (input: URL | RequestInfo, init?: RequestInit) => {
       captured = { url: String(input), init: init ?? {} };
       return Response.json({ success: true, result: { clientOrderId: "WA_CANCEL", active: false, status: "CANCELED", symbol: "BTCUSDT", side: "BUY", origQty: "1", executedQty: "0", fills: [] } });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     const adapter = new WallexOrderExecutionAdapter({ baseUrl: "https://api.wallex.ir", wsUrl: "wss://api.wallex.ir/connection/websocket", apiKey: "credit-key", subAccountClientId: "sub-account", allowedMarkets: ["BTCUSDT"], fetcher });
     const result = await adapter.cancelOrder("WA_CANCEL");
     expect(captured?.url).toContain("/v1/account/orders?clientOrderId=WA_CANCEL");
@@ -115,7 +150,7 @@ describe("Wallex adapters", () => {
         return Response.json({ success: true, result: { markets: [{ symbol: "BTCUSDT", base_asset: "BTC", quote_asset: "USDT", price: "20", price_precision: 2, amount_precision: 4, is_spot: true }] } });
       }
       throw new Error(`Unexpected URL ${url}`);
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     const adapter = new WallexMarketDataAdapter({
       baseUrl: "https://api.wallex.ir", wsUrl: "wss://api.wallex.ir/connection/websocket",
       apiKey: "credit-key", subAccountClientId: "credit-account", allowedMarkets: ["BTCUSDT"], fetcher,
@@ -134,7 +169,7 @@ describe("Wallex adapters", () => {
         USDT: { asset: "USDT", value: "100", locked: "5" },
       } } });
       throw new Error(`Unexpected URL ${String(input)}`);
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     const adapter = new WallexMarketDataAdapter({
       baseUrl: "https://api.wallex.ir", wsUrl: "wss://api.wallex.ir/connection/websocket",
       apiKey: "credit-key", subAccountClientId: "credit-account", allowedMarkets: [], fetcher,

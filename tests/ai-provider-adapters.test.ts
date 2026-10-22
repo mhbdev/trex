@@ -6,6 +6,7 @@ import { SqliteRunRepository } from "../packages/engine/src/adapters/persistence
 import { resolve } from "node:path";
 
 const context: AgentContext = {
+  mode: "backtest",
   symbol: "BTCUSDT",
   quote: { symbol: "BTCUSDT", price: "60000", observedAt: 1_000, source: "wallex-rest" },
   candles: [], research: [], priorFindings: [], recentReflections: [],
@@ -107,6 +108,86 @@ describe("AI SDK gateway adapters", () => {
       expect(calls?.[0]).toMatchObject({
         role: "market_technical_analyst", operation: "analyze", provider: "boxapi.chat", modelId: "gpt-6-luna",
         status: "completed", inputTokens: 321, outputTokens: 19, totalTokens: 340, responseId: "chatcmpl-ai-audit",
+      });
+    } finally { repository.close(); }
+  });
+
+  test("forces a structured final response after an agent reaches its read-only tool-step limit", async () => {
+    const repository = new SqliteRunRepository("file::memory:");
+    repository.migrate(resolve("packages/engine/drizzle"));
+    repository.createRun({ id: "ai-tool-budget-run", mode: "shadow", config: { symbol: "BTCUSDT" }, startedAt: 1_000 });
+    const requests: Array<Record<string, unknown>> = [];
+    const fetcher = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      requests.push(request);
+      const turn = requests.length;
+      return Response.json({
+        id: `chatcmpl-tool-budget-${turn}`,
+        object: "chat.completion",
+        created: 1,
+        model: "gpt-5.6-luna",
+        choices: [{
+          index: 0,
+          message: turn <= 4
+            ? { role: "assistant", content: null, tool_calls: [{ id: `call-${turn}`, type: "function", function: { name: "searchEvidence", arguments: JSON.stringify({ query: "missing-evidence" }) } }] }
+            : { role: "assistant", content: JSON.stringify({ summary: "No directional edge in the supplied evidence.", confidence: 0.25, evidenceIds: [] }) },
+          finish_reason: turn <= 4 ? "tool_calls" : "stop",
+        }],
+        usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+      });
+    }) as unknown as typeof fetch;
+    const model = new AiSdkModelAdapter(
+      loadConfig({ AI_PROVIDER: "boxapi", AI_MODEL: "gpt-5.6-luna", BOXAPI_API_KEY: "box-test-key", AI_ROLE_MAX_TOOL_STEPS_JSON: JSON.stringify({ market_technical_analyst: 4 }) }),
+      fetcher, repository,
+    );
+    try {
+      const finding = await model.analyze("market_technical_analyst", { ...context, runId: "ai-tool-budget-run" });
+      expect(finding.summary).toContain("No directional edge");
+      expect(requests).toHaveLength(5);
+      expect(requests.slice(0, 4).every((request) => request.tool_choice !== "none")).toBe(true);
+      const finalTools = requests[4]?.tools;
+      expect(Array.isArray(finalTools) ? finalTools.length : 0).toBe(0);
+      const calls = repository.getRunDetails("ai-tool-budget-run")?.aiModelCalls;
+      expect(calls).toHaveLength(5);
+      expect(calls?.every((call) => call.status === "completed")).toBe(true);
+    } finally { repository.close(); }
+  });
+
+  test("records missing structured output as a useful agent-level failure", async () => {
+    const repository = new SqliteRunRepository("file::memory:");
+    repository.migrate(resolve("packages/engine/drizzle"));
+    repository.createRun({ id: "ai-empty-output-run", mode: "shadow", config: { symbol: "BTCUSDT" }, startedAt: 1_000 });
+    let turn = 0;
+    const fetcher = (async () => {
+      turn += 1;
+      return Response.json({
+        id: `chatcmpl-empty-output-${turn}`,
+        object: "chat.completion",
+        created: 1,
+        model: "gpt-5.6-luna",
+        choices: [{
+          index: 0,
+          message: turn <= 4
+            ? { role: "assistant", content: null, tool_calls: [{ id: `call-empty-${turn}`, type: "function", function: { name: "searchEvidence", arguments: JSON.stringify({ query: "missing-evidence" }) } }] }
+            : { role: "assistant", content: null },
+          finish_reason: turn <= 4 ? "tool_calls" : "stop",
+        }],
+        usage: { prompt_tokens: 10, completion_tokens: 0, total_tokens: 10 },
+      });
+    }) as unknown as typeof fetch;
+    const model = new AiSdkModelAdapter(
+      loadConfig({ AI_PROVIDER: "boxapi", AI_MODEL: "gpt-5.6-luna", BOXAPI_API_KEY: "box-test-key", AI_ROLE_MAX_TOOL_STEPS_JSON: JSON.stringify({ market_technical_analyst: 4 }) }),
+      fetcher, repository,
+    );
+    try {
+      await expect(model.analyze("market_technical_analyst", { ...context, runId: "ai-empty-output-run" }))
+        .rejects.toThrow("market_technical_analyst analyze request to boxapi/gpt-5.6-luna returned no structured result");
+      const calls = repository.getRunDetails("ai-empty-output-run")?.aiModelCalls;
+      expect(calls).toHaveLength(5);
+      expect(calls?.slice(0, 4).every((call) => call.status === "completed")).toBe(true);
+      expect(calls?.[4]).toMatchObject({
+        role: "market_technical_analyst", status: "failed", errorName: "AgentOutputMissingError",
+        errorMessage: expect.stringContaining("The workflow stopped before a proposal could be accepted."),
       });
     } finally { repository.close(); }
   });

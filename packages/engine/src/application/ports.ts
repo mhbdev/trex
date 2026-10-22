@@ -6,10 +6,10 @@ import type {
 import type { StrategyProfile } from "../domain/strategies.ts";
 
 export interface MarketDataPort {
-  listSpotMarkets(): Promise<MarketSpec[]>;
-  getQuote(symbol: string): Promise<MarketQuote>;
-  getDepth(symbol: string): Promise<{ bids: [string, string][]; asks: [string, string][]; observedAt: number }>;
-  getCandles(symbol: string, fromSeconds: number, toSeconds: number, resolutionMinutes?: 1): Promise<Candle[]>;
+  listSpotMarkets(signal?: AbortSignal): Promise<MarketSpec[]>;
+  getQuote(symbol: string, signal?: AbortSignal): Promise<MarketQuote>;
+  getDepth(symbol: string, signal?: AbortSignal): Promise<{ bids: [string, string][]; asks: [string, string][]; observedAt: number }>;
+  getCandles(symbol: string, fromSeconds: number, toSeconds: number, resolutionMinutes?: 1, signal?: AbortSignal): Promise<Candle[]>;
   getAccountPortfolio?(): Promise<PortfolioState>;
   getPackageUnavailableMarkets?(packageId: string): Promise<string[]>;
   close?(): Promise<void>;
@@ -26,12 +26,26 @@ export interface ResearchProvider {
   readonly id: string;
   readonly categories: readonly ResearchCategory[];
   readonly maxAgeSeconds?: number;
+  skipReason?(symbol: string): string | undefined;
   fetch(symbol: string, categories: readonly ResearchCategory[], now: number): Promise<ResearchItem[]>;
 }
 
 export interface ResearchBundle {
   items: ResearchItem[];
   warnings: { provider: string; message: string }[];
+  coverage?: ResearchProviderCoverage[];
+}
+
+export interface ResearchProviderCoverage {
+  provider: string;
+  categories: ResearchCategory[];
+  status: "available" | "no_matches" | "filtered" | "failed" | "skipped";
+  returnedItemCount: number;
+  acceptedItemCount: number;
+  includedItemCount: number;
+  excludedStaleCount: number;
+  excludedFutureCount: number;
+  message?: string;
 }
 
 export interface ResearchAggregatorPort {
@@ -41,10 +55,13 @@ export interface ResearchAggregatorPort {
 export interface AgentContext {
   /** The owning engine run, used to attach model-call audit records. */
   runId?: string;
+  /** Live market reads are intentionally unavailable in historical backtests. */
+  mode: EngineMode;
   symbol: string;
   quote: MarketQuote;
   candles: Candle[];
   research: ResearchItem[];
+  researchCoverage?: ResearchProviderCoverage[];
   priorFindings: AgentFinding[];
   recentReflections: string[];
   portfolio: PortfolioState;
@@ -76,6 +93,37 @@ export interface AiModelCallRecord {
   warnings: string[];
   errorName?: string;
   errorMessage?: string;
+}
+
+export type WorkflowStageId =
+  | "preparation"
+  | "market_data"
+  | "research"
+  | "analysts"
+  | "research_debate"
+  | "trader_proposal"
+  | "risk_review"
+  | "final_gate"
+  | "outcome";
+
+export type WorkflowStageStatus = "active" | "completed" | "skipped" | "failed";
+
+export interface WorkflowProgress {
+  engineRunId: string;
+  mode: EngineMode;
+  symbol: string;
+  cycle: number;
+  currentStage: WorkflowStageId;
+  stages: Partial<Record<WorkflowStageId, {
+    status: WorkflowStageStatus;
+    startedAt: number;
+    updatedAt: number;
+    detail?: string;
+  }>>;
+  activeAgents: Array<{ id: string; role: AgentRole; startedAt: number }>;
+  completedAgentTasks: number;
+  totalAgentTasks: number;
+  updatedAt: number;
 }
 
 export interface RunAuditDetails {
@@ -130,6 +178,9 @@ export interface ModelPort {
 }
 
 export interface RunRepository {
+  saveManagedRunAttempt(run: ManagedRunAttemptRecord): void;
+  getRecentManagedRunAttempts(limit: number): ManagedRunAttemptRecord[];
+  failInterruptedManagedRunAttempts(endedAt: number): void;
   createRun(input: { id: string; mode: EngineMode; config: Record<string, unknown>; startedAt: number; gitRevision?: string }): void;
   failInterruptedRuns(mode: EngineMode, endedAt: number): void;
   finishRun(id: string, endedAt: number, status: "completed" | "failed", report?: Record<string, unknown>, failure?: { name: string; message: string }): void;
@@ -179,6 +230,21 @@ export interface RunRepository {
   replaceConfigProfileSecrets(profileId: string, secrets: StoredSecretEnvelope[]): void;
   replaceConfigProfileSecretsBatch(profiles: Array<{ profileId: string; secrets: StoredSecretEnvelope[] }>): void;
   close(): void;
+}
+
+export interface ManagedRunAttemptRecord {
+  id: string;
+  mode: EngineMode;
+  profileId: string;
+  state: "starting" | "running" | "waiting" | "stopping" | "completed" | "failed" | "stopped";
+  phase: "setup" | "engine";
+  message: string;
+  startedAt: number;
+  updatedAt: number;
+  symbols: string[];
+  strategyIds: string[];
+  error?: string;
+  workflow?: WorkflowProgress;
 }
 
 export interface PortfolioServicePort {

@@ -5,11 +5,11 @@ import type { RunRepository, StoredConfigProfile, StoredSecretEnvelope } from ".
 import { decryptProfileSecret, encryptProfileSecret, parseEncryptionKey } from "../adapters/security/secret-vault.ts";
 
 const secretEnvironmentKeys = new Set<EngineEnvironmentKey>([
-  "AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY",
+  "AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY", "TRONSCAN_API_KEY",
   "AI_PROVIDER_KEYS_JSON", "RESEARCH_ENDPOINTS_JSON", "MARKET_QUOTE_FALLBACKS_JSON",
 ]);
 const supportedSecretKeys = new Set([
-  "AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY",
+  "AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY", "TRONSCAN_API_KEY",
   "RESEARCH_ENDPOINTS_JSON", "MARKET_QUOTE_FALLBACKS_JSON",
 ]);
 const providerIds: AiProviderId[] = ["openai", "anthropic", "google", "compatible", "boxapi", "liara"];
@@ -24,6 +24,7 @@ export interface ConfigProfileSummary extends StoredConfigProfile {
     providerKeys: Partial<Record<AiProviderId, boolean>>;
     researchEndpoints: boolean;
     marketQuoteFallbacks: boolean;
+    tronscanApiKey: boolean;
   };
 }
 
@@ -261,6 +262,7 @@ export class ConfigurationProfileService {
     return {
       aiApiKey: keys.includes("AI_API_KEY"), wallexApiKey: keys.includes("WALLEX_API_KEY"),
       subAccountClientId: keys.includes("WALLEX_SUB_ACCOUNT_CLIENT_ID"), providerKeys,
+      tronscanApiKey: keys.includes("TRONSCAN_API_KEY"),
       researchEndpoints: keys.includes("RESEARCH_ENDPOINTS_JSON"), marketQuoteFallbacks: keys.includes("MARKET_QUOTE_FALLBACKS_JSON"),
     };
   }

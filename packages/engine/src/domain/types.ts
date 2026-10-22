@@ -110,6 +110,8 @@ export const DecisionProposalSchema = z.object({
   confidence: z.number().min(0).max(1),
   rationale: z.string().min(1),
   evidenceIds: z.array(z.string()).default([]),
+  /** Evidence fetched on demand by read-only tools during proposal generation. */
+  additionalEvidence: z.array(ResearchItemSchema).optional(),
   order: OrderProposalSchema.nullable(),
 }).superRefine((proposal, context) => {
   if (proposal.action === "HOLD" && proposal.order !== null) context.addIssue({ code: "custom", message: "HOLD proposals must not include an order." });
@@ -198,6 +200,8 @@ export interface AgentFinding {
   summary: string;
   confidence: number;
   evidenceIds: string[];
+  /** Evidence fetched on demand by read-only tools during analysis. */
+  additionalEvidence?: ResearchItem[];
   createdAt: number;
 }
 

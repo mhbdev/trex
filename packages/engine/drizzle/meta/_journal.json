@@ -71,6 +71,20 @@
       "when": 1792608478974,
       "tag": "0009_config_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792680000000,
+      "tag": "0010_managed_run_attempts",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792681200000,
+      "tag": "0011_managed_workflow_progress",
+      "breakpoints": true
     }
   ]
 }

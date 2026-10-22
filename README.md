@@ -14,25 +14,50 @@ The model agents are read-only. They can inspect provided evidence and completed
 
 ## Setup
 
+### Start the dashboard
+
+Requirements: Bun 1.2 or newer and network access for package installation and exchange/model APIs. Clone the repo and install its workspaces:
+
 ```powershell
+git clone https://github.com/mhbdev/trex.git
+cd trex
 bun install
-# Generate this once and store it in your OS secret manager; never put it in SQLite or a dotenv file.
+# Run once for this database. Store the printed key in a password manager or OS secret store.
 bun run trex secrets generate-key
-# Set ENCRYPTION_KEY in the process environment/secret manager before storing credentials.
-bun run trex ui
 ```
 
-Open the local address printed by `ui` (default `http://127.0.0.1:4173`). The dashboard and CLI use the same SQLite database and named configuration profiles. All application runtime settings and provider/exchange credentials come from the active database profile; general process environment variables and dotenv files are not configuration sources. To migrate an existing `.env`, first provide the external `ENCRYPTION_KEY`, then use `trex profile import-dotenv <path> --name <profile>`. The importer validates and stores recognized settings, verifies encrypted credentials, then removes imported assignments from the source file. The dashboard can run `doctor`, `validate`, market checks, migration, backtests, shadow runs, explicitly confirmed live runs, reports, and linked live-order cancellation.
-
-For a temporary local PowerShell session, capture a newly generated key without printing it and pass it to child processes:
+Set the saved key in each terminal session before starting Trex. PowerShell prompts without echoing the value:
 
 ```powershell
-$env:ENCRYPTION_KEY = (bun --no-env-file apps/cli/src/main.ts secrets generate-key)
-bun run trex profile import-dotenv .\.env --name "Local"
-bun run trex ui
+$secureKey = Read-Host "ENCRYPTION_KEY from your secret store" -AsSecureString
+$env:ENCRYPTION_KEY = [System.Net.NetworkCredential]::new("", $secureKey).Password
+bun run ui
 ```
 
-Keep a durable backup of the key in an OS secret manager before creating encrypted credentials. If the key is lost, the encrypted secrets cannot be recovered. Closing the browser leaves engine work running; stopping the local service requests a graceful stop for managed runs.
+On macOS or Linux, use a hidden prompt in Bash and then start the dashboard:
+
+```bash
+read -rsp "ENCRYPTION_KEY from your secret store: " ENCRYPTION_KEY; printf '\n'; export ENCRYPTION_KEY
+bun run ui
+```
+
+Open `http://127.0.0.1:4173`. In **Profiles and settings**, choose the active profile and configure an AI provider, model, provider key, and approved market symbols. Save, then use **System health** to validate the setup. Start with a backtest or shadow run to exercise the agents and virtual portfolio without sending exchange orders. Model API calls may still incur provider charges. Shadow uses live Wallex market data; backtest uses historical candles.
+
+The key must stay the same for this database. Generate it once, save it outside the repository and database, and load that saved value whenever Trex starts. Generating a replacement key makes existing encrypted credentials unreadable. If the key is lost, those credentials cannot be recovered. Closing the browser leaves engine work running; stopping the local service requests a graceful stop for managed runs.
+
+The dashboard and CLI use the same SQLite database and named configuration profiles. Runtime settings and provider/exchange credentials come from the active database profile; dotenv files are not loaded during normal startup. To migrate an existing `.env`, first provide the external `ENCRYPTION_KEY`, then use `bun run trex profile import-dotenv <path> --name <profile>`. The importer validates and stores recognized settings, verifies encrypted credentials, then removes imported assignments from the source file. The dashboard can run diagnostics, validate settings, inspect markets, start backtests and shadow or explicitly confirmed live runs, review reports, and cancel linked live orders.
+
+### Use the CLI
+
+The guided setup stores configuration in the active database profile. Run it once, check the setup, then start a one-cycle shadow run:
+
+```powershell
+bun run trex configure --mode shadow
+bun run trex doctor --mode shadow --check-wallex
+bun run trex shadow --symbol BTCTMN --strategy agentic-balanced --html reports/first-shadow.html
+```
+
+For continuous one-minute shadow evaluation, add `--watch --interval-seconds 60`. Shadow never creates an exchange order writer. Use `bun run trex --help` and `bun run trex <command> --help` to see available commands and options. The [engine guide](packages/engine/README.md) explains the workflow, agent debate and memory, risk checks, portfolios, and audit trail.
 
 The default Trex SQLite database is stored in the current OS user's application-data directory (`~/AppData/Local/trex/trex.sqlite` on Windows, `~/Library/Application Support/trex/trex.sqlite` on macOS, and `~/.local/share/trex/trex.sqlite` on Linux). If an existing database from an earlier Trex version is present, Trex keeps using it so profiles and run history remain available. To use another database, pass the bootstrap-only `--database-url` option, for example `bun run trex --database-url file:./data/trex.sqlite ui`; the database location is not a profile setting because the engine must know where the database is before it can read settings. When importing a legacy dotenv file whose `DATABASE_URL` pointed to a non-default database, pass that same path as `--database-url` to the import command. Migration files are resolved relative to the installed engine, so database commands also work when launched from another directory.
 
@@ -82,7 +107,9 @@ The BoxAPI adapter sends `reasoning_effort: "none"` through the AI SDK provider 
 
 For BoxAPI workflow tests, start with `gpt-5.6-luna`; its current model catalog describes it as fast and economical. Compare `gpt-5.6-terra` as a balanced candidate, then test `gpt-5.6-sol` or the `gpt-6.1-sol` alias shown in your hackathon model list for decision quality. Do not start every role on `gpt-6-astra`: the current BoxAPI text model catalog lists it at $10 per million input tokens and $50 per million output tokens, and one engine decision invokes many roles. If experimenting with Astra, assign it to one role first with `AI_ROLE_MODELS_JSON` and measure actual BoxAPI usage. These are test candidates, not claims about trading profitability; BoxAPI pricing/model availability can change. The `text-embedding-3-small` and `text-embedding-3-large` models are embedding models, not chat models, so they cannot be used for `AI_MODEL`; this engine currently has no embedding-based memory retrieval. Before a shadow run, smoke-test the chosen model with the engine because AI SDK tool loops require the selected model/account to support tool calls and the final proposal must pass structured-output validation.
 
-Set `AI_REQUEST_TIMEOUT_SECONDS` in the active profile with `trex config set AI_REQUEST_TIMEOUT_SECONDS <seconds>` to bound each model call. Configure optional contextual feeds through the dashboard's data-source settings or the encrypted `RESEARCH_ENDPOINTS_JSON` profile secret. Each endpoint is queried with `symbol`, comma-separated `categories`, and point-in-time `asOf` parameters and returns `{ "items": [ResearchItem] }`; optional `maxAgeSeconds` controls how long each feed is considered fresh. Stale and future-dated items are excluded, response size is capped, and provider errors are recorded as warnings without erasing other providers' evidence. Provider URLs must use HTTPS; HTTP is allowed only for localhost development.
+Set `AI_REQUEST_TIMEOUT_SECONDS` in the active profile with `trex config set AI_REQUEST_TIMEOUT_SECONDS <seconds>` to bound a full model operation. `AI_TOOL_TIMEOUT_SECONDS` bounds each tool call, including optional Wallex market reads. `AI_TIMEOUT_RETRIES` controls bounded retries after a full model operation times out (0–2; default 1). Each retry is recorded in run diagnostics. Market reads carry cancellation through to the HTTP request and retry only while the operation remains active; order writes are never automatically retried. Configure optional contextual feeds through the dashboard's data-source settings or the encrypted `RESEARCH_ENDPOINTS_JSON` profile secret. Each endpoint is queried with `symbol`, comma-separated `categories`, and point-in-time `asOf` parameters and returns `{ "items": [ResearchItem] }`; optional `maxAgeSeconds` controls how long each feed is considered fresh. Stale and future-dated items are excluded, response size is capped, and provider errors are recorded as warnings without erasing other providers' evidence. Provider URLs must use HTTPS; HTTP is allowed only for localhost development.
+
+Live and shadow runs query CoinPaprika for exact-symbol asset catalogue, supply fields and aggregated USD market metrics, and CoinDesk's RSS feed for current headlines. Reddit and StockTwits remain controlled by the active profile. When the active profile has a TronScan API key, TRX runs also query TronScan's TRON-mainnet indexer for circulating supply, cumulative block/vote rewards and fee/resource burns, current reward/fee/resource chain parameters with linked proposal history, network staking-rate history, governance proposals, protocol-reported burn/staking revenue, and recent network-wide daily activity. Add the key under Profile settings; TronScan requires an API key for normal mainnet access ([key setup and authentication](https://docs.tronscan.org/en/api/api-keys), [API requirements](https://docs.tronscan.org/en/api/common-network-auth)). Analysts can query DexPaprika on demand for exact-ticker candidates in indexed decentralized-exchange markets; results include network and token address/id because tickers can collide. Run audits record each source's status, returned/accepted/included item counts, and stale/future exclusions. no_matches, failed, filtered, and skipped are coverage outcomes, not proof that an event or activity did not happen. CoinPaprika figures are third-party aggregates and may be estimates; its free API plan is limited to personal use and requires attribution, so commercial use needs a suitable license ([API terms](https://coinpaprika.com/api/pricing/), [ticker data](https://docs.coinpaprika.com/api-reference/tickers/get-ticker-for-a-specific-coin)). CoinDesk items are headlines/excerpts ([RSS feed information](https://www.coindesk.com/coindesk-news/2021/09/17/coindesk-rss)). TronScan provides indexed protocol/network aggregates, not a holder-specific return or full local verification ([supply and burn](https://docs.tronscan.org/en/api/statistics/funds), [staking](https://docs.tronscan.org/en/api/statistics/freezeresource), [chain parameters](https://docs.tronscan.org/en/api/witness/chainparameters), [protocol revenue](https://docs.tronscan.org/en/api/protocol-revenue-service-api/turnover-new), [governance](https://docs.tronscan.org/en/api/witness/proposal), [network activity](https://docs.tronscan.org/en/api/statistics/stats-overview)). DexPaprika covers indexed pools only ([API overview](https://docs.dexpaprika.com/introduction)). These sources do not provide a verified future unlock calendar or prove holder-level utility capture; the tokenomics analyst must mark missing dimensions unassessable. Price, candles, and trading volume are not tokenomics evidence.
 
 `MARKET_QUOTE_FALLBACKS_JSON` is an encrypted profile value containing an ordered array of `{ "id", "url", "timeoutMs?", "headers?" }` endpoints. Each endpoint receives `?symbol=...` and must return `{ "symbol", "price", "observedAt?" }`; timestamps are Unix milliseconds. Configure it in the dashboard's data-source settings or with a masked `trex config set MARKET_QUOTE_FALLBACKS_JSON` prompt. Wallex remains first choice and is required for live authorization. Fallback prices are visibly marked with their provider ID and cannot pass the live risk gate. Provider URLs must use HTTPS; HTTP is allowed only for localhost development.
 

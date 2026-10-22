@@ -13,6 +13,21 @@ export const runs = sqliteTable("runs", {
   failureMessage: text("failure_message"),
 });
 
+export const managedRunAttempts = sqliteTable("managed_run_attempts", {
+  id: text("id").primaryKey(),
+  mode: text("mode").notNull(),
+  profileId: text("profile_id").notNull(),
+  state: text("state").notNull(),
+  phase: text("phase").notNull(),
+  message: text("message").notNull(),
+  startedAt: integer("started_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+  symbolsJson: text("symbols_json").notNull(),
+  strategyIdsJson: text("strategy_ids_json").notNull(),
+  error: text("error"),
+  workflowJson: text("workflow_json").notNull().default("{}"),
+}, (table) => [index("managed_run_attempts_started_idx").on(table.startedAt)]);
+
 export const sourceSnapshots = sqliteTable("source_snapshots", {
   id: text("id").primaryKey(),
   runId: text("run_id").notNull().references(() => runs.id),
