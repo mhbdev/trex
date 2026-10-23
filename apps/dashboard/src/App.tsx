@@ -1099,7 +1099,16 @@ function ReportsView({ t, locale, runs, managedRuns, notify, focusRunId }: { t: 
   useEffect(() => { if (focusRunId) setSelectedRunId(focusRunId); }, [focusRunId]);
   const history = [...runs.map((run) => ({ id: run.id, mode: run.mode, state: run.status, startedAt: run.startedAt, config: run.config, managed: false as const })), ...managedRuns.map((run) => ({ id: run.id, mode: run.mode, state: run.state, startedAt: run.startedAt, config: { symbol: run.symbols[0], symbols: run.symbols, strategyIds: run.strategyIds }, managed: true as const }))].sort((a, b) => b.startedAt - a.startedAt);
   const activeManagedRun = managedRuns.find((item) => ["starting", "running", "waiting", "stopping"].includes(item.state));
-  const runId = selectedRunId || activeManagedRun?.workflow?.engineRunId || activeManagedRun?.id || history[0]?.id || "";
+  // A managed attempt (what Run lab hands over) stores its decisions under the engine run it spawned, so resolve to that run whenever it exists.
+  const resolvedSelection = (() => {
+    if (!selectedRunId) return "";
+    if (runs.some((run) => run.id === selectedRunId)) return selectedRunId;
+    const attempt = managedRuns.find((run) => run.id === selectedRunId);
+    const engineRunId = attempt?.workflow?.engineRunId;
+    if (engineRunId && runs.some((run) => run.id === engineRunId)) return engineRunId;
+    return attempt ? selectedRunId : "";
+  })();
+  const runId = resolvedSelection || activeManagedRun?.workflow?.engineRunId || activeManagedRun?.id || history[0]?.id || "";
   const storedRun = runs.find((run) => run.id === runId);
   const selectedAttempt = managedRuns.find((run) => run.id === runId);
   const pipelineAttempt = selectedAttempt ?? managedRuns.find((item) => item.workflow?.engineRunId === runId);
@@ -1154,8 +1163,23 @@ function ReportsView({ t, locale, runs, managedRuns, notify, focusRunId }: { t: 
     ? percent(metrics.executionReliabilityPct)
     : "—";
   const drawdownTone = Number(metrics.maxDrawdownPct) > 0 ? "down" : "plain";
+  // The newest decision of this run is the headline: what the agents concluded and whether the risk gate let it through.
+  const finalDecision = [...decisions].sort((a, b) => Number(b.decidedAt ?? 0) - Number(a.decidedAt ?? 0))[0];
+  const finalProposal = object(finalDecision?.proposal), finalRisk = object(finalDecision?.risk);
+  const finalAction = String(finalProposal.action ?? "HOLD").toUpperCase();
+  const runInProgress = Boolean(pipelineAttempt && ["starting", "running", "waiting", "stopping"].includes(pipelineAttempt.state)) || run?.status === "running";
+  const showDecisionDetails = () => { if (finalDecision) setExpandedDecision(finalDecision.id); document.querySelector(".decision-audit-card")?.scrollIntoView({ behavior: "smooth", block: "start" }); };
+  const decisionBanner = finalDecision
+    ? <Card className={`final-decision ${finalAction.toLowerCase()}`}><div className="final-decision-main"><span className={`action-badge large ${finalAction.toLowerCase()}`}>{actionTitle(finalAction, locale)}</span><div><h2>{locale === "fa" ? "تصمیم نهایی دستیارها" : "Final agent decision"}</h2>
+        <p>{finalDecision.symbol} · {new Intl.NumberFormat(locale === "fa" ? "fa-IR" : "en-US", { maximumFractionDigits: 0 }).format(Number(finalProposal.confidence ?? 0) * 100)}{locale === "fa" ? "٪ اطمینان مدل" : "% model confidence"} · {finalRisk.approved ? (locale === "fa" ? "بررسی ریسک تأیید کرد" : "risk gate approved") : finalAction === "HOLD" ? (locale === "fa" ? "سفارشی لازم نبود" : "no order needed") : (locale === "fa" ? "بررسی ریسک رد کرد؛ سفارشی ثبت نشد" : "risk gate rejected; no order placed")} · {dateLabel(finalDecision.decidedAt, locale)}{decisions.length > 1 ? ` · ${locale === "fa" ? `آخرین از ${numberLabel(decisions.length, locale)} تصمیم` : `latest of ${decisions.length} decisions`}` : ""}</p>
+        {(finalProposal.rationale ?? finalProposal.reasoning) && <p className="rationale" dir="auto">{String(finalProposal.rationale ?? finalProposal.reasoning).slice(0, 320)}{String(finalProposal.rationale ?? finalProposal.reasoning).length > 320 ? "…" : ""}</p>}</div>
+        <button className="button secondary" onClick={showDecisionDetails}><ChevronDown size={15}/>{locale === "fa" ? "جزئیات تصمیم" : "Decision details"}</button></div></Card>
+    : storedRun ? <Card className={`final-decision ${runInProgress ? "pending" : "none"}`}><div className="final-decision-main"><span className="action-badge large">{runInProgress ? (locale === "fa" ? "در انتظار" : "PENDING") : "—"}</span><div><h2>{runInProgress ? (locale === "fa" ? "دستیارها هنوز در حال تحلیل‌اند" : "The agents are still working") : (locale === "fa" ? "تصمیمی برای این اجرا ثبت نشده است" : "No decision was recorded for this run")}</h2>
+        <p>{runInProgress ? (locale === "fa" ? "تصمیم نهایی (خرید، فروش یا نگه‌داری) پس از پایان این چرخه همین‌جا نمایش داده می‌شود." : "The final BUY, SELL, or HOLD decision appears here as soon as this cycle completes.") : run?.status === "failed" ? (locale === "fa" ? "اجرا پیش از تصمیم‌گیری متوقف شد؛ دلیل آن در ادامه آمده است." : "The run stopped before a decision was made; the reason is shown below.") : (locale === "fa" ? "این اجرا بدون تصمیم ثبت‌شده به پایان رسید." : "This run finished without a recorded decision.")}</p></div></div></Card>
+    : null;
   return <><PageHeading title={t.reportsTitle} description={locale === "fa" ? "عملکرد، تصمیم‌ها، اطلاعات بازار، بررسی‌های ریسک، سفارش‌ها و درخواست‌های هوش مصنوعی هر اجرا را ببینید." : "Inspect performance, agent decisions, source evidence, risk checks, fills, and model activity for each run."} action={<button className="button secondary" onClick={() => void exportHtml()} disabled={!storedRun}><ArrowDownToLine size={15}/>{t.export}</button>} />
     <Card className="report-select-card"><div className="report-run-picker"><label><FieldLabelInfo label={locale === "fa" ? "انتخاب اجرا" : "Select run"} help={locale === "fa" ? "اجراهای موتور و تلاش‌های مدیریت‌شده، از جمله خطاهای پیش از شروع دستیارها، در این فهرست هستند." : "Engine runs and managed attempts appear here, including setup failures that happened before agents started."}/><AppSelect ariaLabel={locale === "fa" ? "انتخاب اجرا" : "Select run"} value={runId} onValueChange={setSelectedRunId} locale={locale} options={history.map((item) => ({ value: item.id, label: `${modeTitle(item.mode, locale)} · ${runSymbols(object(item.config)).join(", ") || item.id.slice(0, 8)} · ${dateLabel(item.startedAt, locale)}`, detail: `${statusTitle(item.state, locale)}${item.managed ? (locale === "fa" ? " · تلاش اجرا" : " · managed attempt") : ""}` }))}/></label><div className="run-metadata"><span className={`mode-badge ${run?.mode ?? pipelineAttempt?.mode ?? "shadow"}`}>{run?.mode ? modeTitle(run.mode, locale) : pipelineAttempt ? modeTitle(pipelineAttempt.mode, locale) : "—"}</span><span className={statusClass(pipelineAttempt?.state ?? run?.status ?? "unknown")}>{pipelineAttempt ? statusTitle(pipelineAttempt.state, locale) : run?.status ? statusTitle(run.status, locale) : "—"}</span><small className="muted">{run?.startedAt ? dateLabel(run.startedAt, locale) : pipelineAttempt ? dateLabel(pipelineAttempt.startedAt, locale) : ""}</small></div></div></Card>
+    {decisionBanner}
     <WorkflowCanvas locale={locale} progress={workflow} run={run} audit={report} attempt={pipelineAttempt} />
     <Card className="benchmark-card">
       <div className="card-heading">

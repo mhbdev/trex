@@ -1180,3 +1180,20 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, #root::-webkit-scrollbar, .app
 .wizard-team .strategy-toolbar { margin-top: 10px; }
 .wizard-team .segmented-tabs { margin-top: 4px; }
 @media (max-width: 820px) { .wizard-steps { grid-template-columns: 1fr 1fr; } }
+
+/* Final decision headline on a run report */
+.final-decision { margin-bottom: 14px; }
+.final-decision.buy { border-color: #365749; background: #142019; }
+.final-decision.sell { border-color: #613e3b; background: #221716; }
+.final-decision.hold { border-color: #5d4b2a; background: #211e16; }
+.final-decision.pending { border-color: #384a63; background: #16202b; }
+.final-decision-main { display: flex; align-items: center; gap: 14px; }
+.final-decision-main > div { flex: 1; min-width: 0; }
+.final-decision h2 { margin: 0; font-size: 14px; font-weight: 650; }
+.final-decision p { margin: 4px 0 0; color: var(--muted); font-size: 10px; line-height: 1.7; }
+.final-decision p.rationale { color: var(--text-2); }
+.final-decision .button { flex: 0 0 auto; }
+.action-badge.large { min-width: 84px; padding: 13px 10px; border-radius: 9px; font-size: 13px; letter-spacing: .04em; }
+.action-badge.hold { color: var(--amber); border-color: #5d4b2a; background: #2a2519; }
+.final-decision.pending .action-badge.large { color: var(--blue); border-color: #384a63; background: #1d2837; }
+@media (max-width: 640px) { .final-decision-main { flex-wrap: wrap; } .final-decision .button { width: 100%; } }
