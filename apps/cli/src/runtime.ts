@@ -110,8 +110,9 @@ export function publicConfig(config: EngineConfig) {
       toolTimeoutMs: config.ai.toolTimeoutMs,
       timeoutRetries: config.ai.timeoutRetries,
       boxapi: { baseUrl: config.ai.boxApiBaseUrl, apiKeyConfigured: Boolean(config.ai.providerKeys.boxapi) },
+      openrouter: { baseUrl: config.ai.openRouterBaseUrl, apiKeyConfigured: Boolean(config.ai.providerKeys.openrouter) },
       liara: { baseUrl: config.ai.liaraBaseUrl, workspaceConfigured: Boolean(config.ai.liaraWorkspaceId), apiKeyConfigured: Boolean(config.ai.providerKeys.liara) },
-      configuredProviders: ["openai", "anthropic", "google", "compatible", "boxapi", "liara"].filter((provider) =>
+      configuredProviders: ["openai", "anthropic", "google", "compatible", "boxapi", "liara", "openrouter"].filter((provider) =>
         Boolean(config.ai.providerKeys[provider as keyof typeof config.ai.providerKeys] || (provider === config.ai.provider && config.ai.apiKey))),
       roleModels: config.ai.roleModels,
       roleInstructions: config.ai.roleInstructions,

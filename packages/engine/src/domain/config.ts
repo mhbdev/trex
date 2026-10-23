@@ -8,7 +8,7 @@ import { parseStrategyProfiles, type StrategyProfile } from "./strategies.ts";
 import { normalizeMarketSymbol } from "./market-symbol.ts";
 import { parsePairLimits } from "./pair-limits.ts";
 
-export type AiProviderId = "openai" | "anthropic" | "google" | "compatible" | "boxapi" | "liara";
+export type AiProviderId = "openai" | "anthropic" | "google" | "compatible" | "boxapi" | "liara" | "openrouter";
 
 const bool = (fallback: boolean) => z.preprocess((v) => {
   if (v === undefined || v === null || v === "") return fallback;
@@ -57,12 +57,14 @@ const envSchema = z.object({
   WALLEX_PACKAGE_ID: z.string().optional(),
   WALLEX_QUOTE_CURRENCY: z.string().default("USDT"),
   LIVE_MAX_GROSS_EXPOSURE: z.string().regex(/^\d+(\.\d+)?$/).default("0"),
-  AI_PROVIDER: z.enum(["openai", "anthropic", "google", "compatible", "boxapi", "liara"]).default("openai"),
+  AI_PROVIDER: z.enum(["openai", "anthropic", "google", "compatible", "boxapi", "liara", "openrouter"]).default("openai"),
   AI_MODEL: z.string().default("gpt-4.1-mini"),
   AI_API_KEY: z.string().optional(),
   AI_BASE_URL: z.preprocess((value) => value === "" ? undefined : value, secureProviderUrl.optional()),
   BOXAPI_API_KEY: z.string().optional(),
   BOXAPI_BASE_URL: httpsUrl.default("https://ai.boxapi.ir/ai/v1"),
+  OPENROUTER_API_KEY: z.string().optional(),
+  OPENROUTER_BASE_URL: httpsUrl.default("https://openrouter.ai/api/v1"),
   LIARA_API_KEY: z.string().optional(),
   LIARA_WORKSPACE_ID: z.string().optional(),
   TRONSCAN_API_KEY: z.string().optional(),
@@ -125,6 +127,7 @@ export interface EngineConfig {
     baseUrl?: string;
     providerKeys: Partial<Record<AiProviderId, string>>;
     boxApiBaseUrl: string;
+    openRouterBaseUrl: string;
     liaraBaseUrl: string;
     liaraWorkspaceId?: string;
     roleModels: Partial<Record<AgentRole, string>>;
@@ -186,15 +189,16 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>> = {
     if (typeof value === "string" && value !== "") normalizedEnv[key] = normalizeJsonEnvironmentValue(value, key);
   }
   const parsed = envSchema.parse(normalizedEnv);
-  const providerKeys = z.partialRecord(z.enum(["openai", "anthropic", "google", "compatible", "boxapi", "liara"]), z.string().min(1)).parse(JSON.parse(parsed.AI_PROVIDER_KEYS_JSON));
+  const providerKeys = z.partialRecord(z.enum(["openai", "anthropic", "google", "compatible", "boxapi", "liara", "openrouter"]), z.string().min(1)).parse(JSON.parse(parsed.AI_PROVIDER_KEYS_JSON));
   if (parsed.BOXAPI_API_KEY) providerKeys.boxapi = parsed.BOXAPI_API_KEY;
+  if (parsed.OPENROUTER_API_KEY) providerKeys.openrouter = parsed.OPENROUTER_API_KEY;
   if (parsed.LIARA_API_KEY) providerKeys.liara = parsed.LIARA_API_KEY;
   const rawRoleModels = z.record(z.string(), z.string().min(1)).parse(JSON.parse(parsed.AI_ROLE_MODELS_JSON));
   const roleModels: Partial<Record<AgentRole, string>> = {};
   for (const [rawRole, model] of Object.entries(rawRoleModels)) {
     const role = RoleSchema.parse(rawRole);
     const [provider, modelId, extra] = model.split(":");
-    if (!provider || !modelId || extra !== undefined || !["openai", "anthropic", "google", "compatible", "boxapi", "liara"].includes(provider)) {
+    if (!provider || !modelId || extra !== undefined || !["openai", "anthropic", "google", "compatible", "boxapi", "liara", "openrouter"].includes(provider)) {
       throw new Error(`AI_ROLE_MODELS_JSON value for ${role} must use provider:model syntax.`);
     }
     roleModels[role] = model;
@@ -240,6 +244,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>> = {
       ...(parsed.AI_BASE_URL ? { baseUrl: parsed.AI_BASE_URL } : {}),
       providerKeys,
       boxApiBaseUrl: parsed.BOXAPI_BASE_URL.replace(/\/$/, ""),
+      openRouterBaseUrl: parsed.OPENROUTER_BASE_URL.replace(/\/$/, ""),
       liaraBaseUrl: parsed.LIARA_BASE_URL.replace(/\/$/, ""),
       ...(parsed.LIARA_WORKSPACE_ID ? { liaraWorkspaceId: parsed.LIARA_WORKSPACE_ID } : {}),
       roleModels,

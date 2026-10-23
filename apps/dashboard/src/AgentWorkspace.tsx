@@ -16,10 +16,10 @@ type Props = {
   onRefresh: () => void;
 };
 
-const providers = ["openai", "anthropic", "google", "compatible", "boxapi", "liara"];
+const providers = ["openai", "anthropic", "google", "compatible", "boxapi", "liara", "openrouter"];
 function providerTitle(provider: string, fa: boolean) {
   if (provider === "compatible") return fa ? "سرویس سازگار با OpenAI" : "OpenAI-compatible service";
-  return provider === "boxapi" ? "BoxAPI" : provider === "liara" ? "Liara" : provider[0]!.toUpperCase() + provider.slice(1);
+  return provider === "boxapi" ? "BoxAPI" : provider === "liara" ? "Liara" : provider === "openrouter" ? "OpenRouter" : provider[0]!.toUpperCase() + provider.slice(1);
 }
 
 function toRecord<T>(value: unknown): AgentMap<T> {

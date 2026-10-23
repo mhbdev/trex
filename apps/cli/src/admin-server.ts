@@ -36,10 +36,10 @@ interface ManagedRun {
 }
 
 const secretKeys = new Set([
-  "AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY", "TRONSCAN_API_KEY",
+  "AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY", "OPENROUTER_API_KEY", "TRONSCAN_API_KEY",
   "AI_PROVIDER_KEYS_JSON", "RESEARCH_ENDPOINTS_JSON", "MARKET_QUOTE_FALLBACKS_JSON", "ENCRYPTION_KEY",
 ]);
-const providerIds = ["openai", "anthropic", "google", "compatible", "boxapi", "liara"] as const;
+const providerIds = ["openai", "anthropic", "google", "compatible", "boxapi", "liara", "openrouter"] as const;
 const RekeySecretsSchema = z.object({ previousKey: z.string().min(1).optional(), replacementKey: z.string().min(1).optional() });
 const settingGroups: Record<string, string> = {
   AI_PROVIDER: "AI & agents", AI_MODEL: "AI & agents", AI_BASE_URL: "AI & agents", AI_REQUEST_TIMEOUT_SECONDS: "AI & agents",
@@ -57,7 +57,7 @@ const settingGroups: Record<string, string> = {
   RESEARCH_REDDIT_ENABLED: "Data sources", RESEARCH_STOCKTWITS_ENABLED: "Data sources",
   TRONSCAN_API_KEY: "Data sources",
   MARKET_QUOTE_FALLBACKS_JSON: "Data sources",
-  LOG_LEVEL: "Advanced", ENGINE_MODE: "Advanced", BOXAPI_BASE_URL: "AI & agents", LIARA_BASE_URL: "AI & agents",
+  LOG_LEVEL: "Advanced", ENGINE_MODE: "Advanced", BOXAPI_BASE_URL: "AI & agents", OPENROUTER_BASE_URL: "AI & agents", LIARA_BASE_URL: "AI & agents",
   LIARA_WORKSPACE_ID: "AI & agents",
 };
 
@@ -74,7 +74,7 @@ function envValue(config: EngineConfig): Record<string, string> {
     AI_ROLE_INSTRUCTIONS_JSON: JSON.stringify(config.ai.roleInstructions, null, 2),
     AI_ROLE_MAX_TOOL_STEPS_JSON: JSON.stringify(config.ai.roleMaxToolSteps, null, 2),
     AI_DISABLED_AGENTS_JSON: JSON.stringify(config.ai.disabledRoles, null, 2),
-    AI_PROVIDER_KEYS_JSON: "[set using encrypted provider-key fields]", BOXAPI_BASE_URL: config.ai.boxApiBaseUrl,
+    AI_PROVIDER_KEYS_JSON: "[set using encrypted provider-key fields]", BOXAPI_BASE_URL: config.ai.boxApiBaseUrl, OPENROUTER_BASE_URL: config.ai.openRouterBaseUrl,
     LIARA_BASE_URL: config.ai.liaraBaseUrl, LIARA_WORKSPACE_ID: config.ai.liaraWorkspaceId ?? "",
     ENGINE_STRATEGIES_JSON: JSON.stringify(config.strategies, null, 2),
     ENGINE_MAX_DEBATE_ROUNDS: String(config.maxDebateRounds), ENGINE_MAX_RISK_DISCUSS_ROUNDS: String(config.maxRiskDiscussRounds),

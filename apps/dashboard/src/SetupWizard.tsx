@@ -5,7 +5,7 @@ import { api } from "./api";
 import { AppSelect, FieldLabelInfo } from "./ui-primitives";
 
 type Locale = "fa" | "en";
-type Provider = "openai" | "anthropic" | "google" | "compatible" | "boxapi" | "liara";
+type Provider = "openai" | "anthropic" | "google" | "compatible" | "boxapi" | "liara" | "openrouter";
 type Field = { key: string; value: string; secret: boolean };
 type SecretState = { aiApiKey?: boolean; providerKeys?: Partial<Record<Provider, boolean>>; wallexApiKey?: boolean; subAccountClientId?: boolean };
 type Market = { symbol: string; baseAsset: string; quoteAsset: string; spotEnabled: boolean };
@@ -18,8 +18,8 @@ type Helpers = {
   statusTitle: (value: string, locale: Locale) => string;
 };
 
-const providers: Provider[] = ["openai", "anthropic", "google", "compatible", "boxapi", "liara"];
-const suggestedModel: Record<Provider, string> = { openai: "gpt-4.1-mini", anthropic: "", google: "", compatible: "", boxapi: "gpt-5.6-luna", liara: "" };
+const providers: Provider[] = ["openai", "anthropic", "google", "compatible", "boxapi", "liara", "openrouter"];
+const suggestedModel: Record<Provider, string> = { openai: "gpt-4.1-mini", anthropic: "", google: "", compatible: "", boxapi: "gpt-5.6-luna", liara: "", openrouter: "openai/gpt-4.1-mini" };
 const starterBases = ["BTC", "ETH", "USDT"];
 
 export function setupNeeded(config: { ai?: { apiKeyConfigured?: boolean }; wallex?: { allowedMarkets?: string[] } } | undefined): boolean {
@@ -46,6 +46,7 @@ export function SetupWizard({ locale, profileId, profileName, fields, secrets, h
   const [model, setModel] = useState(fieldValue("AI_MODEL"));
   const [baseUrl, setBaseUrl] = useState(fieldValue("AI_BASE_URL"));
   const [boxapiBaseUrl, setBoxapiBaseUrl] = useState(fieldValue("BOXAPI_BASE_URL", "https://ai.boxapi.ir/ai/v1"));
+  const [openrouterBaseUrl, setOpenrouterBaseUrl] = useState(fieldValue("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"));
   const [liaraBaseUrl, setLiaraBaseUrl] = useState(fieldValue("LIARA_BASE_URL", "https://ai.liara.ir"));
   const [liaraWorkspaceId, setLiaraWorkspaceId] = useState(fieldValue("LIARA_WORKSPACE_ID"));
   const [apiKey, setApiKey] = useState("");
@@ -116,6 +117,7 @@ export function SetupWizard({ locale, profileId, profileName, fields, secrets, h
       const settings: Record<string, string> = { AI_PROVIDER: provider, AI_MODEL: model.trim() };
       if (provider === "compatible") settings.AI_BASE_URL = baseUrl.trim();
       if (provider === "boxapi") settings.BOXAPI_BASE_URL = boxapiBaseUrl.trim();
+      if (provider === "openrouter") settings.OPENROUTER_BASE_URL = openrouterBaseUrl.trim();
       if (provider === "liara") { settings.LIARA_BASE_URL = liaraBaseUrl.trim(); settings.LIARA_WORKSPACE_ID = liaraWorkspaceId.trim(); }
       await api("/api/settings", { method: "PUT", body: JSON.stringify({ profileId, settings }) });
       if (apiKey.trim()) await api(`/api/profiles/${encodeURIComponent(profileId)}`, { method: "PUT", body: JSON.stringify({ secrets: { providerKeys: { [provider]: apiKey.trim() } } }) });
@@ -148,8 +150,8 @@ export function SetupWizard({ locale, profileId, profileName, fields, secrets, h
 
   const providerOptions = providers.map((id) => ({
     value: id,
-    label: id === "openai" ? "OpenAI" : id === "anthropic" ? "Anthropic" : id === "google" ? "Google" : id === "compatible" ? tx("سرویس سازگار با OpenAI", "OpenAI-compatible") : id === "boxapi" ? "BoxAPI" : "Liara",
-    detail: id === "compatible" ? tx("نشانی و مدل سرویس دلخواه", "Custom provider URL and model") : id === "boxapi" ? tx("مدل از مسیر BoxAPI", "Models through BoxAPI") : id === "liara" ? tx("مدل از مسیر Liara", "Models through Liara") : tx("کلید حساب خودتان", "Your own account key"),
+    label: id === "openai" ? "OpenAI" : id === "anthropic" ? "Anthropic" : id === "google" ? "Google" : id === "compatible" ? tx("سرویس سازگار با OpenAI", "OpenAI-compatible") : id === "boxapi" ? "BoxAPI" : id === "openrouter" ? "OpenRouter" : "Liara",
+    detail: id === "compatible" ? tx("نشانی و مدل سرویس دلخواه", "Custom provider URL and model") : id === "boxapi" ? tx("مدل از مسیر BoxAPI", "Models through BoxAPI") : id === "liara" ? tx("مدل از مسیر Liara", "Models through Liara") : id === "openrouter" ? tx("صدها مدل با یک کلید", "Hundreds of models with one key") : tx("کلید حساب خودتان", "Your own account key"),
   }));
   const steps = [
     { title: tx("هوش مصنوعی", "AI provider"), hint: tx("سرویس، مدل و کلید", "Service, model, and key"), icon: Cpu },
@@ -171,6 +173,7 @@ export function SetupWizard({ locale, profileId, profileName, fields, secrets, h
         <label className="wizard-field"><FieldLabelInfo label={tx("سرویس هوش مصنوعی", "AI provider")} help={tx("سرویسی که حساب و کلید آن را دارید.", "The service you hold an account and API key for.")}/><AppSelect ariaLabel={tx("سرویس هوش مصنوعی", "AI provider")} value={provider} locale={locale} options={providerOptions} onValueChange={(value) => { const next = value as Provider; setProvider(next); setModel(next === currentProvider ? fieldValue("AI_MODEL") : suggestedModel[next]); setError(""); }}/></label>
         <label className="wizard-field"><FieldLabelInfo label={tx("نام مدل", "Model ID")} help={tx("نام دقیق مدل همان‌طور که سرویس شما آن را می‌شناسد.", "The exact model ID as your provider lists it.")}/><input type="text" dir="ltr" value={model} onChange={(event) => setModel(event.target.value)} placeholder={suggestedModel[provider] || tx("مثلاً نام مدل از فهرست مدل‌های حساب شما", "e.g. a model ID from your account's model list")} autoComplete="off"/></label>
         {provider === "compatible" && <label className="wizard-field full"><FieldLabelInfo label={tx("نشانی سرویس سازگار با OpenAI", "OpenAI-compatible service URL")} help={tx("برای سرویس‌های اینترنتی نشانی HTTPS لازم است؛ http فقط برای localhost مجاز است.", "Internet services need HTTPS; http is allowed only for localhost.")}/><input type="url" dir="ltr" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://example.com/v1" autoComplete="off"/></label>}
+        {provider === "openrouter" && <label className="wizard-field full"><FieldLabelInfo label={tx("نشانی سرویس OpenRouter", "OpenRouter service URL")} help={tx("برای سرویس رسمی مقدار پیش‌فرض را نگه دارید. نام مدل‌ها به شکل vendor/model است، مثلاً openai/gpt-4.1-mini.", "Keep the default for the official service. Model IDs use the vendor/model form, for example openai/gpt-4.1-mini.")}/><input type="url" dir="ltr" value={openrouterBaseUrl} onChange={(event) => setOpenrouterBaseUrl(event.target.value)} autoComplete="off"/></label>}
         {provider === "boxapi" && <label className="wizard-field full"><FieldLabelInfo label={tx("نشانی سرویس BoxAPI", "BoxAPI service URL")} help={tx("اگر از سرویس رسمی استفاده می‌کنید، مقدار پیش‌فرض را نگه دارید.", "Keep the default for the official service.")}/><input type="url" dir="ltr" value={boxapiBaseUrl} onChange={(event) => setBoxapiBaseUrl(event.target.value)} autoComplete="off"/></label>}
         {provider === "liara" && <><label className="wizard-field"><FieldLabelInfo label={tx("نشانی سرویس Liara", "Liara service URL")} help={tx("اگر از سرویس رسمی استفاده می‌کنید، مقدار پیش‌فرض را نگه دارید.", "Keep the default for the official service.")}/><input type="url" dir="ltr" value={liaraBaseUrl} onChange={(event) => setLiaraBaseUrl(event.target.value)} autoComplete="off"/></label>
           <label className="wizard-field"><FieldLabelInfo label={tx("شناسهٔ فضای کاری Liara", "Liara workspace ID")} help={tx("فضای کاری‌ای که مدل‌ها و کلید شما به آن تعلق دارند.", "The workspace your models and key belong to.")}/><input type="text" dir="ltr" value={liaraWorkspaceId} onChange={(event) => setLiaraWorkspaceId(event.target.value)} autoComplete="off"/></label></>}

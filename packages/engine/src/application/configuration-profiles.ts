@@ -5,14 +5,14 @@ import type { RunRepository, StoredConfigProfile, StoredSecretEnvelope } from ".
 import { decryptProfileSecret, encryptProfileSecret, parseEncryptionKey } from "../adapters/security/secret-vault.ts";
 
 const secretEnvironmentKeys = new Set<EngineEnvironmentKey>([
-  "AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY", "TRONSCAN_API_KEY",
+  "AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY", "OPENROUTER_API_KEY", "TRONSCAN_API_KEY",
   "AI_PROVIDER_KEYS_JSON", "RESEARCH_ENDPOINTS_JSON", "MARKET_QUOTE_FALLBACKS_JSON",
 ]);
 const supportedSecretKeys = new Set([
-  "AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY", "TRONSCAN_API_KEY",
+  "AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY", "OPENROUTER_API_KEY", "TRONSCAN_API_KEY",
   "RESEARCH_ENDPOINTS_JSON", "MARKET_QUOTE_FALLBACKS_JSON",
 ]);
-const providerIds: AiProviderId[] = ["openai", "anthropic", "google", "compatible", "boxapi", "liara"];
+const providerIds: AiProviderId[] = ["openai", "anthropic", "google", "compatible", "boxapi", "liara", "openrouter"];
 const forbiddenProfileKeys = new Set(["ENCRYPTION_KEY"]);
 
 export interface ConfigProfileSummary extends StoredConfigProfile {

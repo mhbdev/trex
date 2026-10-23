@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const ProviderSchema = z.enum(["openai", "anthropic", "google", "compatible", "boxapi", "liara"]);
+export const ProviderSchema = z.enum(["openai", "anthropic", "google", "compatible", "boxapi", "liara", "openrouter"]);
 
 export const ProfileSecretStateSchema = z.object({
   aiApiKey: z.boolean(),

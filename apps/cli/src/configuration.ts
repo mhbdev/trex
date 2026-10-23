@@ -13,6 +13,8 @@ const optionEnvironmentKeys: Record<string, EngineEnvironmentKey> = {
   aiBaseUrl: "AI_BASE_URL",
   boxapiApiKey: "BOXAPI_API_KEY",
   boxapiBaseUrl: "BOXAPI_BASE_URL",
+  openrouterApiKey: "OPENROUTER_API_KEY",
+  openrouterBaseUrl: "OPENROUTER_BASE_URL",
   liaraApiKey: "LIARA_API_KEY",
   liaraWorkspaceId: "LIARA_WORKSPACE_ID",
   liaraBaseUrl: "LIARA_BASE_URL",
@@ -38,12 +40,14 @@ const optionEnvironmentKeys: Record<string, EngineEnvironmentKey> = {
 export function addConfigOptions(command: Command): Command {
   return command
     .option("--set <KEY=VALUE>", "override any configuration value for this command (repeatable)", (value: string, previous: string[] = []) => [...previous, value], [])
-    .option("--ai-provider <provider>", "AI provider: openai, anthropic, google, compatible, boxapi, or liara")
+    .option("--ai-provider <provider>", "AI provider: openai, anthropic, google, compatible, boxapi, liara, or openrouter")
     .option("--ai-model <model>", "AI model ID")
     .option("--ai-api-key <key>", "AI key override (may be stored in shell history; prefer configure)")
     .option("--ai-base-url <url>", "OpenAI-compatible provider URL")
     .option("--boxapi-api-key <key>", "BoxAPI key override (prefer configure)")
     .option("--boxapi-base-url <url>", "BoxAPI OpenAI-compatible base URL")
+    .option("--openrouter-api-key <key>", "OpenRouter key override (prefer configure)")
+    .option("--openrouter-base-url <url>", "OpenRouter OpenAI-compatible base URL")
     .option("--liara-api-key <key>", "Liara AI API key override (prefer configure)")
     .option("--liara-workspace-id <id>", "Liara AI workspace ID")
     .option("--liara-base-url <url>", "Liara AI API origin")
@@ -153,7 +157,7 @@ async function promptYesNo(label: string, fallback: boolean): Promise<boolean> {
 
 function effectiveProviderKey(env: NodeJS.ProcessEnv, provider: string): string | undefined {
   const keys = JSON.parse(env.AI_PROVIDER_KEYS_JSON ?? "{}") as Record<string, string>;
-  const dedicated = provider === "boxapi" ? env.BOXAPI_API_KEY : provider === "liara" ? env.LIARA_API_KEY : undefined;
+  const dedicated = provider === "boxapi" ? env.BOXAPI_API_KEY : provider === "liara" ? env.LIARA_API_KEY : provider === "openrouter" ? env.OPENROUTER_API_KEY : undefined;
   return dedicated || keys[provider] || (env.AI_PROVIDER === provider ? env.AI_API_KEY : undefined);
 }
 
@@ -167,9 +171,9 @@ export async function configureEnvironment(
   const updates: Partial<Record<EngineEnvironmentKey, string>> = {};
   let provider: string;
   for (;;) {
-    provider = await promptText("AI provider (openai, anthropic, google, compatible, boxapi, liara)", env.AI_PROVIDER ?? "openai");
-    if (["openai", "anthropic", "google", "compatible", "boxapi", "liara"].includes(provider)) break;
-    process.stdout.write("Choose openai, anthropic, google, compatible, boxapi, or liara.\n");
+    provider = await promptText("AI provider (openai, anthropic, google, compatible, boxapi, liara, openrouter)", env.AI_PROVIDER ?? "openai");
+    if (["openai", "anthropic", "google", "compatible", "boxapi", "liara", "openrouter"].includes(provider)) break;
+    process.stdout.write("Choose openai, anthropic, google, compatible, boxapi, liara, or openrouter.\n");
   }
   const model = await promptText("AI model ID", env.AI_MODEL ?? "gpt-4.1-mini");
   updates.AI_PROVIDER = provider;
@@ -250,7 +254,7 @@ export async function configureEnvironment(
     if (key === "AI_PROVIDER_KEYS_JSON") {
       const providerKeys = JSON.parse(value) as Record<string, string>;
       for (const [providerId, providerKey] of Object.entries(providerKeys)) secrets[`AI_PROVIDER_KEY:${providerId}`] = providerKey;
-    } else if (["AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY", "RESEARCH_ENDPOINTS_JSON", "MARKET_QUOTE_FALLBACKS_JSON"].includes(key)) secrets[key] = value;
+    } else if (["AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY", "OPENROUTER_API_KEY", "RESEARCH_ENDPOINTS_JSON", "MARKET_QUOTE_FALLBACKS_JSON"].includes(key)) secrets[key] = value;
     else settings[key] = value;
   }
   profileContext.profiles.update(profileContext.profiles.activeId(), { settings, secrets });
@@ -265,7 +269,7 @@ export async function persistConfigValue(keyInput: string, suppliedValue?: strin
   const key = keyInput.trim().toUpperCase();
   if (!allowedKeys.has(key)) throw new Error(`Unknown configuration key ${key}.`);
   const secret = [
-    "AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY",
+    "AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY", "OPENROUTER_API_KEY",
     "AI_PROVIDER_KEYS_JSON", "RESEARCH_ENDPOINTS_JSON", "MARKET_QUOTE_FALLBACKS_JSON",
   ].includes(key);
   const value = suppliedValue ?? (secret ? await promptSecret(`${key} (input hidden)`) : await promptText(key));
@@ -282,7 +286,7 @@ export async function persistConfigValue(keyInput: string, suppliedValue?: strin
       for (const provider of Object.keys(existing)) if (!currentProviders.has(provider)) secrets[`AI_PROVIDER_KEY:${provider}`] = null;
       for (const [provider, providerKey] of Object.entries(next)) secrets[`AI_PROVIDER_KEY:${provider}`] = providerKey;
       context.profiles.update(activeId, { secrets });
-    } else if (["AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY", "RESEARCH_ENDPOINTS_JSON", "MARKET_QUOTE_FALLBACKS_JSON"].includes(key)) {
+    } else if (["AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY", "OPENROUTER_API_KEY", "RESEARCH_ENDPOINTS_JSON", "MARKET_QUOTE_FALLBACKS_JSON"].includes(key)) {
       context.profiles.update(activeId, { secrets: { [key]: value } });
     } else context.profiles.update(activeId, { settings: { [key]: value } });
     process.stdout.write(`Saved ${key} in the active encrypted configuration profile.\n`);
@@ -295,7 +299,7 @@ export async function removeConfigValue(keyInput: string): Promise<void> {
   const context = createProfileContext();
   try {
     const profileId = context.profiles.activeId();
-    if (["AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY", "RESEARCH_ENDPOINTS_JSON", "MARKET_QUOTE_FALLBACKS_JSON"].includes(key)) context.profiles.update(profileId, { secrets: { [key]: null } });
+    if (["AI_API_KEY", "WALLEX_API_KEY", "WALLEX_SUB_ACCOUNT_CLIENT_ID", "BOXAPI_API_KEY", "LIARA_API_KEY", "OPENROUTER_API_KEY", "RESEARCH_ENDPOINTS_JSON", "MARKET_QUOTE_FALLBACKS_JSON"].includes(key)) context.profiles.update(profileId, { secrets: { [key]: null } });
     else if (key === "AI_PROVIDER_KEYS_JSON") {
       const secrets = Object.fromEntries(Object.keys(context.profiles.get(profileId).secretState.providerKeys).map((provider) => [`AI_PROVIDER_KEY:${provider}`, null]));
       context.profiles.update(profileId, { secrets });
