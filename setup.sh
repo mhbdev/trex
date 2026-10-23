@@ -22,6 +22,34 @@ main() {
   fail() { printf '\nError: %s\n' "$*" >&2; exit 1; }
   have() { command -v "$1" >/dev/null 2>&1; }
   is_trex_project() { [ -f "$1/package.json" ] && grep -q '"name": "trex"' "$1/package.json"; }
+  create_desktop_shortcut() {
+    local project="$1" desktop entry
+    if [ "$(uname -s)" = "Darwin" ]; then
+      desktop="$HOME/Desktop"
+      [ -d "$desktop" ] || return 0
+      [ -e "$desktop/Trex.command" ] && return 0
+      printf '#!/bin/bash\n# Starts or opens the Trex dashboard.\nexec bash "%s/setup.sh"\n' "$project" > "$desktop/Trex.command"
+      chmod +x "$desktop/Trex.command"
+    else
+      desktop="$(xdg-user-dir DESKTOP 2>/dev/null || printf '%s/Desktop' "$HOME")"
+      entry="[Desktop Entry]
+Type=Application
+Name=Trex
+Comment=Start or open the Trex dashboard
+Exec=bash \"$project/setup.sh\"
+Path=$project
+Terminal=true
+Categories=Office;Finance;"
+      mkdir -p "$HOME/.local/share/applications"
+      [ -e "$HOME/.local/share/applications/trex.desktop" ] || printf '%s\n' "$entry" > "$HOME/.local/share/applications/trex.desktop"
+      [ -d "$desktop" ] || return 0
+      [ -e "$desktop/Trex.desktop" ] && return 0
+      printf '%s\n' "$entry" > "$desktop/Trex.desktop"
+      chmod +x "$desktop/Trex.desktop"
+      gio set "$desktop/Trex.desktop" metadata::trusted true 2>/dev/null || true
+    fi
+    say "Added a Trex shortcut to your desktop"
+  }
 
   # 1. Find the project: the folder this script lives in, an existing install, or a fresh download.
   local script_dir="" project_dir=""
@@ -69,6 +97,12 @@ main() {
   cd "$project_dir"
   say "Installing dependencies"
   bun install </dev/null
+
+  # 4. Desktop shortcut that runs this same launcher next time (skip with TREX_NO_SHORTCUT=1).
+  if [ -z "${TREX_NO_SHORTCUT:-}" ]; then
+    create_desktop_shortcut "$project_dir" || printf 'Could not create a desktop shortcut; continuing.\n' >&2
+  fi
+
   say "Starting Trex (press Ctrl+C to stop it)"
   exec bun run --no-env-file apps/cli/src/main.ts start --port "$port"
 }
