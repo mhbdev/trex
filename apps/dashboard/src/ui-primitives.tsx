@@ -223,7 +223,8 @@ export function MoneyInput({ value, onChange, currency, locale, placeholder, dis
     ? `${new Intl.NumberFormat(locale === "fa" ? "fa-IR" : "en-US", { maximumFractionDigits: 2 }).format(numeric)}${currency ? ` ${currency}` : ""}${compactAmount(numeric, locale)}`
     : "";
   return <span className="money-input">
-    <span className="money-input-control">
+    {/* The control is always left-to-right so the currency badge and the input padding stay on the same side in RTL pages. */}
+    <span className="money-input-control" dir="ltr">
       <input id={id} aria-label={ariaLabel} type="text" inputMode="decimal" dir="ltr" autoComplete="off" value={formatAmountInput(value)} placeholder={placeholder} disabled={disabled} onChange={(event) => onChange(parseAmountInput(event.target.value))}/>
       {currency && <span className="money-input-currency" aria-hidden="true">{currency}</span>}
     </span>

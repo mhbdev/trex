@@ -1157,8 +1157,8 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, #root::-webkit-scrollbar, .app
 /* Amount inputs with live formatting */
 .money-input { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .money-input-control { position: relative; display: block; }
-.money-input-control input { width: 100%; padding-inline-end: 58px; }
-.money-input-currency { position: absolute; inset-inline-end: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); font: 600 9px Inter, "Vazirmatn", sans-serif; letter-spacing: .04em; pointer-events: none; }
+.money-input-control input { width: 100%; padding-right: 58px; padding-left: 10px; text-align: left; }
+.money-input-currency { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); font: 600 9px Inter, "Vazirmatn", sans-serif; letter-spacing: .04em; pointer-events: none; }
 .money-input-caption { color: var(--muted); font-size: 8px; line-height: 1.5; }
 
 /* Guided errors and toast actions */
