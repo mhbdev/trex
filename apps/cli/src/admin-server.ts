@@ -12,6 +12,7 @@ import {
 import { SqliteRunRepository } from "@trex/engine/adapters/persistence/store";
 import type { WorkflowProgress } from "@trex/engine/application/ports";
 import { decryptProfileSecret, generateEncryptionKey, parseEncryptionKey, rotateProfileSecretEnvelopes } from "@trex/engine/adapters/security/secret-vault";
+import { resolveEncryptionKey, writeEncryptionKeyFile } from "@trex/engine/adapters/security/encryption-key-file";
 import { ConfigurationProfileService } from "@trex/engine/application/configuration-profiles";
 import { ExecutionLeaseGuard } from "@trex/engine/application/execution-lease";
 import { orderIntentState } from "@trex/engine/application/live-execution";
@@ -38,7 +39,7 @@ const secretKeys = new Set([
   "AI_PROVIDER_KEYS_JSON", "RESEARCH_ENDPOINTS_JSON", "MARKET_QUOTE_FALLBACKS_JSON", "ENCRYPTION_KEY",
 ]);
 const providerIds = ["openai", "anthropic", "google", "compatible", "boxapi", "liara"] as const;
-const RekeySecretsSchema = z.object({ previousKey: z.string().min(1), replacementKey: z.string().min(1) });
+const RekeySecretsSchema = z.object({ previousKey: z.string().min(1).optional(), replacementKey: z.string().min(1).optional() });
 const settingGroups: Record<string, string> = {
   AI_PROVIDER: "AI & agents", AI_MODEL: "AI & agents", AI_BASE_URL: "AI & agents", AI_REQUEST_TIMEOUT_SECONDS: "AI & agents",
   AI_TOOL_TIMEOUT_SECONDS: "AI & agents", AI_TIMEOUT_RETRIES: "AI & agents",
@@ -443,6 +444,11 @@ export async function startAdminServer(options: { host?: string; port?: number; 
   if (host !== "127.0.0.1") throw new Error("The local admin API may only bind to 127.0.0.1.");
   const environment = options.environment ?? process.env;
   const databaseUrl = options.databaseUrl ?? getDatabaseUrl();
+  // Operator-supplied ENCRYPTION_KEY wins; otherwise the key is managed in a file beside the database and created on first use.
+  const encryptionKey = resolveEncryptionKey({ databaseUrl, environment });
+  environment.ENCRYPTION_KEY = encryptionKey.key;
+  const managedKeyFile = encryptionKey.source === "file" ? encryptionKey.path : undefined;
+  if (encryptionKey.created && managedKeyFile) console.log(`Created a new encryption key at ${managedKeyFile}. Back up that file: without it, stored credentials cannot be recovered.`);
   const baseConfig = loadConfig({ DATABASE_URL: databaseUrl });
   const repository = new SqliteRunRepository(baseConfig.databaseUrl);
   repository.migrate();
@@ -521,6 +527,7 @@ export async function startAdminServer(options: { host?: string; port?: number; 
           const runsList = repository.getRecentRuns(30);
           return json({ profiles: profiles.list().map((item) => summarizeProfile(item)), activeProfileId: profiles.activeId(), selectedProfileId: profileId,
             config: publicConfig(config), encryptionKeyConfigured: (() => { try { if (!environment.ENCRYPTION_KEY) return false; parseEncryptionKey(environment.ENCRYPTION_KEY); return true; } catch { return false; } })(),
+            encryptionKeySource: encryptionKey.source, encryptionKeyPath: managedKeyFile ?? null,
             fields: configFields(profileId), strategies: config.strategies,
             runs: runsList, managedRuns: runs.list(), database: { url: config.databaseUrl, migrationCommand: "db:migrate" } });
         }
@@ -576,11 +583,21 @@ export async function startAdminServer(options: { host?: string; port?: number; 
         }
         if (url.pathname === "/api/secrets/generate-key" && request.method === "POST") return json({ key: generateEncryptionKey(), notice: "Copy this key to an external secret manager. It is not stored by this application." });
         if (url.pathname === "/api/secrets/rekey" && request.method === "POST") {
-          const { previousKey, replacementKey } = await parseJsonBody(request, RekeySecretsSchema);
+          const body = await parseJsonBody(request, RekeySecretsSchema);
+          // With the managed key file both keys are optional: the current key is known and a replacement is generated here.
+          const previousKey = body.previousKey ?? (managedKeyFile ? environment.ENCRYPTION_KEY ?? "" : "");
+          const replacementKey = body.replacementKey ?? (managedKeyFile ? generateEncryptionKey() : "");
+          if (!previousKey || !replacementKey) throw new Error("previousKey and replacementKey are required when ENCRYPTION_KEY is supplied by the operator.");
           const newKey = parseEncryptionKey(replacementKey), oldKey = parseEncryptionKey(previousKey);
           const count = rotateProfileSecretEnvelopes(profiles.list().map(({ id }) => ({ id })), repository, oldKey, newKey);
+          if (managedKeyFile) writeEncryptionKeyFile(managedKeyFile, replacementKey);
           environment.ENCRYPTION_KEY = replacementKey;
-          return json({ reencryptedSecretCount: count, restartRequired: true, message: "Secrets were re-encrypted. Update ENCRYPTION_KEY in your process secret manager and restart the service." });
+          return json({
+            reencryptedSecretCount: count, restartRequired: !managedKeyFile, keyFileUpdated: Boolean(managedKeyFile),
+            message: managedKeyFile
+              ? `Secrets were re-encrypted and the key file at ${managedKeyFile} was replaced. Refresh any backup copies of that file.`
+              : "Secrets were re-encrypted. Update ENCRYPTION_KEY in your process secret manager and restart the service.",
+          });
         }
         if (url.pathname === "/api/settings" && request.method === "PUT") {
           const body = z.object({ profileId: z.string(), settings: z.record(z.string(), z.string()) }).parse(await request.json());

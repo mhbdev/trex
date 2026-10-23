@@ -17,7 +17,8 @@
   "scripts": {
     "dev": "bun run --no-env-file --watch apps/cli/src/main.ts",
     "dev:dashboard": "bun run --no-env-file --cwd apps/dashboard dev",
-    "start": "bun run --no-env-file apps/cli/src/main.ts",
+    "setup": "bun run --no-env-file apps/cli/src/main.ts start",
+    "start": "bun run --no-env-file apps/cli/src/main.ts start",
     "trex": "bun run --no-env-file apps/cli/src/main.ts",
     "ui": "bun run --no-env-file apps/cli/src/main.ts ui",
     "build": "bun run --no-env-file --cwd apps/dashboard build",
