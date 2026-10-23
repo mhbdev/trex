@@ -12,6 +12,7 @@ import { EndpointListEditor } from "./EndpointListEditor";
 import { RoleRouteEditor } from "./RoleRouteEditor";
 import { AgentWorkspace } from "./AgentWorkspace";
 import { agentTitle } from "./agent-catalog";
+import { SetupWizard, setupNeeded } from "./SetupWizard";
 
 type Locale = "fa" | "en";
 type JsonMap = Record<string, any>;
@@ -33,7 +34,7 @@ type WorkflowProgress = {
 
 const copy: Record<Locale, Record<string, string>> = {
   fa: {
-    overview: "نمای کلی", runLab: "آزمایش و اجرا", profiles: "پروفایل‌ها و تنظیمات", strategies: "دستیارها و استراتژی‌ها",
+    setup: "راه‌اندازی سریع", overview: "نمای کلی", runLab: "آزمایش و اجرا", profiles: "پروفایل‌ها و تنظیمات", strategies: "دستیارها و استراتژی‌ها",
     markets: "بازارها", reports: "گزارش و بررسی", orders: "سفارش‌ها", system: "سلامت سیستم", refresh: "به‌روزرسانی",
     operator: "میزکار", activeProfile: "پروفایل فعال", virtual: "سرمایه مجازی", actual: "موجودی واقعی والکس",
     runs: "اجراها", decisions: "تصمیم‌ها", noData: "هنوز داده‌ای برای نمایش نیست", recent: "آخرین اجراها",
@@ -62,7 +63,7 @@ const copy: Record<Locale, Record<string, string>> = {
     importPath: "مسیر فایل .env روی همین دستگاه", profileName: "نام پروفایل جدید", copied: "کپی شد",
   },
   en: {
-    overview: "Overview", runLab: "Run lab", profiles: "Profiles & settings", strategies: "Agents & strategies",
+    setup: "Quick setup", overview: "Overview", runLab: "Run lab", profiles: "Profiles & settings", strategies: "Agents & strategies",
     markets: "Markets", reports: "Reports & audit", orders: "Orders", system: "System health", refresh: "Refresh",
     operator: "Operator workspace", activeProfile: "Active profile", virtual: "Virtual capital", actual: "Actual Wallex balance",
     runs: "Runs", decisions: "Decisions", noData: "Nothing to show yet", recent: "Recent runs",
@@ -93,7 +94,7 @@ const copy: Record<Locale, Record<string, string>> = {
 };
 
 const nav = [
-  ["overview", LayoutDashboard], ["runLab", Activity], ["profiles", Settings2], ["strategies", Blocks],
+  ["setup", Sparkles], ["overview", LayoutDashboard], ["runLab", Activity], ["profiles", Settings2], ["strategies", Blocks],
   ["markets", ArrowLeftRight], ["reports", BarChart3], ["orders", WalletCards], ["system", Gauge],
 ] as const;
 
@@ -604,11 +605,23 @@ export default function App() {
   const latestReport = runs.find((run) => run.report)?.report ?? {};
   const navTitle = t[view] ?? t.overview;
   const refresh = () => { void queryClient.invalidateQueries(); };
+  // First run: open the quick-setup wizard until the profile has an AI key and at least one allowed market, unless the user skipped it.
+  const needsSetup = setupNeeded(bootstrap?.config);
+  const [autoRouted, setAutoRouted] = useState(false);
+  useEffect(() => {
+    if (!bootstrap || !profileId || autoRouted) return;
+    setAutoRouted(true);
+    let dismissed = false;
+    try { dismissed = Boolean(localStorage.getItem(`trex-setup-dismissed:${profileId}`)); } catch { /* storage unavailable */ }
+    if (needsSetup && !dismissed) setView("setup");
+  }, [bootstrap, profileId, needsSetup, autoRouted]);
 
   if (bootQuery.isPending) return <div className="boot-screen"><span className="brand-mark"><Activity size={21} /></span><LoaderCircle className="spin" size={20} /><p>{locale === "fa" ? "در حال آماده‌سازی فضای اپراتور…" : "Preparing operator workspace…"}</p></div>;
   if (bootQuery.isError || !bootstrap) return <div className="boot-screen"><AlertTriangle size={28} /><h1>{locale === "fa" ? "اتصال به داشبورد برقرار نشد" : "Dashboard service unavailable"}</h1><p>{bootQuery.error ? errorText(bootQuery.error.message, locale) : (locale === "fa" ? "سرویس پاسخ نداد. دوباره تلاش کنید." : "The service did not respond. Try again.")}</p><button className="button primary" onClick={() => void bootQuery.refetch()}><RefreshCw size={16} />{t.refresh}</button></div>;
 
   const renderView = () => {
+    if (view === "setup") return <SetupWizard locale={locale} profileId={profileId} profileName={profile?.name ?? ""} fields={bootstrap.fields} secrets={profile?.secrets ?? {}} helpers={{ errorText, issueText, diagnosticTitle, diagnosticDetailText, statusTitle }} notify={notify} onRefresh={refresh}
+      onFinish={() => setView("runLab")} onDismiss={() => { try { localStorage.setItem(`trex-setup-dismissed:${profileId}`, String(Date.now())); } catch { /* storage unavailable */ } setView("overview"); }} />;
     if (view === "overview") return <OverviewView t={t} locale={locale} config={bootstrap.config} runs={runs} managedRuns={managedRuns} latestReport={latestReport} assetIcons={assetIconsQuery.data ?? {}} onNavigate={setView} />;
     if (view === "runLab") return <RunLabView t={t} locale={locale} profileId={profileId} profiles={bootstrap.profiles} config={bootstrap.config} strategies={bootstrap.strategies} runs={runs} managedRuns={managedRuns} assetIcons={assetIconsQuery.data ?? {}} notify={notify} onRefresh={refresh} />;
     if (view === "profiles") return <ProfilesView t={t} locale={locale} profile={profile} profiles={bootstrap.profiles} profileId={profileId} fields={bootstrap.fields} encryptionConfigured={Boolean((bootstrap as JsonMap).encryptionKeyConfigured)} encryptionKeySource={String((bootstrap as JsonMap).encryptionKeySource ?? "")} encryptionKeyPath={typeof (bootstrap as JsonMap).encryptionKeyPath === "string" ? String((bootstrap as JsonMap).encryptionKeyPath) : ""} onSelect={setSelectedProfileId} onNavigate={(target) => { if (target === "strategies") setStrategySection("strategies"); setView(target); }} notify={notify} onRefresh={refresh} />;
@@ -625,7 +638,7 @@ export default function App() {
       <div className="side-label">{locale === "fa" ? "میز کار" : "WORKSPACE"}</div>
       <nav aria-label={locale === "fa" ? "ناوبری اصلی" : "Primary navigation"}>
         {nav.map(([id, Icon]) => <button key={id} className={`nav-item ${view === id ? "active" : ""}`} onClick={() => { if (id === "strategies") setStrategySection("agents"); setView(id); }} aria-current={view === id ? "page" : undefined}>
-          <Icon size={17} strokeWidth={1.8} /><span>{t[id]}</span>{id === "runLab" && managedRuns.some((run) => ["running", "waiting", "starting"].includes(run.state)) && <i className="live-dot" />}
+          <Icon size={17} strokeWidth={1.8} /><span>{t[id]}</span>{id === "runLab" && managedRuns.some((run) => ["running", "waiting", "starting"].includes(run.state)) && <i className="live-dot" />}{id === "setup" && needsSetup && <i className="live-dot attention" />}
         </button>)}
       </nav>
     </aside>
