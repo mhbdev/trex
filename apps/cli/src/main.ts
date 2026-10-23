@@ -6,7 +6,9 @@ import { ConfiguredJsonResearchProvider } from "@trex/engine/application/researc
 import { WallexMarketDataAdapter, WallexMarketStream } from "@trex/engine/adapters/wallex/rest";
 import { SqliteRunRepository } from "@trex/engine/adapters/persistence/store";
 import { parseQuoteFallbacks } from "@trex/engine/adapters/providers/quote-failover";
-import { createLiveExecution, createRuntime, createProfileContext, loadEffectiveConfig, publicConfig } from "./runtime.ts";
+import { createLiveExecution, createRuntime, createProfileContext, getDatabaseUrl, loadEffectiveConfig, publicConfig } from "./runtime.ts";
+import { ensureEncryptionKey, writeEncryptionKeyFile, type ResolvedEncryptionKey } from "@trex/engine/adapters/security/encryption-key-file";
+import { buildDashboard, dashboardIsBuilt, openInBrowser, probeDashboard } from "./launcher.ts";
 import { WallexOrderExecutionAdapter } from "@trex/engine/adapters/wallex/rest";
 import { orderIntentState } from "@trex/engine/application/live-execution";
 import { ExecutionLeaseGuard } from "@trex/engine/application/execution-lease";
@@ -64,9 +66,23 @@ async function resolveModeConfig(mode: "backtest" | "shadow" | "live", options: 
   return loadEffectiveConfig();
 }
 
+let encryptionKeyState: ResolvedEncryptionKey | undefined;
+
+function activeEncryptionKey(): ResolvedEncryptionKey {
+  if (!encryptionKeyState) throw new Error("The encryption key has not been initialized for this command.");
+  return encryptionKeyState;
+}
+
 program.hook("preAction", async (_thisCommand, actionCommand) => {
   const options = actionCommand.optsWithGlobals() as Record<string, unknown>;
   applyConfigOptions(options);
+  // Printing a fresh key for an external secret manager must not create or read the managed key file.
+  if (actionCommand.name() === "generate-key") return;
+  // Operators may still supply ENCRYPTION_KEY; otherwise the key lives in a file beside the database and is created on first use.
+  encryptionKeyState = ensureEncryptionKey(getDatabaseUrl());
+  if (encryptionKeyState.created && encryptionKeyState.path) {
+    console.error(`Created a new encryption key at ${encryptionKeyState.path}. Back up that file: without it, credentials stored in the database cannot be recovered.`);
+  }
 });
 
 function parseList(value: string | undefined, label: string, fallback?: string): string[] {
@@ -173,26 +189,70 @@ profileCommand.command("import-dotenv").description("Import settings into an enc
     finally { context.repository.close(); }
   });
 
-const secretsCommand = program.command("secrets").description("Manage the external profile-encryption key.");
-secretsCommand.command("generate-key").description("Generate a random 32-byte encryption master key for an OS secret manager.")
+const secretsCommand = program.command("secrets").description("Manage the profile-encryption key. Trex keeps it in a key file beside the database unless ENCRYPTION_KEY is supplied.");
+secretsCommand.command("status").description("Show where the active encryption key comes from.")
+  .action(() => {
+    const state = activeEncryptionKey();
+    if (state.source === "file") console.log(`Encryption key: managed key file at ${state.path}\nBack up that file together with the database. The key itself is never printed.`);
+    else if (state.source === "environment") console.log("Encryption key: supplied through the ENCRYPTION_KEY environment variable.");
+    else console.log("Encryption key: temporary key for an in-memory database.");
+  });
+secretsCommand.command("generate-key").description("Print a random 32-byte key for operators who prefer to supply ENCRYPTION_KEY themselves.")
   .action(() => console.log(generateEncryptionKey()));
-secretsCommand.command("rekey").description("Re-encrypt stored profile secrets with the configured encryption master key.")
+secretsCommand.command("rekey").description("Re-encrypt stored profile secrets with a new key. With the managed key file, a fresh key is generated and the file is replaced; with ENCRYPTION_KEY supplied, that value becomes the new key and the previous key is prompted.")
   .action(async () => {
-    const newKey = parseEncryptionKey();
-    const oldKey = parseEncryptionKey(await promptSecret("Enter previous ENCRYPTION_KEY (input hidden)"));
+    const state = activeEncryptionKey();
     const context = createProfileContext();
     try {
-      const count = rotateProfileSecretEnvelopes(context.profiles.list().map(({ id }) => ({ id })), context.repository, oldKey, newKey);
+      const profileIds = context.profiles.list().map(({ id }) => ({ id }));
+      if (state.source === "file" && state.path) {
+        const replacement = generateEncryptionKey();
+        const count = rotateProfileSecretEnvelopes(profileIds, context.repository, parseEncryptionKey(state.key), parseEncryptionKey(replacement));
+        writeEncryptionKeyFile(state.path, replacement);
+        process.env.ENCRYPTION_KEY = replacement;
+        console.log(`Re-encrypted ${count} profile secret(s) and replaced the key file at ${state.path}. Refresh any backup copies of that file.`);
+        return;
+      }
+      const newKey = parseEncryptionKey(state.key);
+      const oldKey = parseEncryptionKey(await promptSecret("Enter previous ENCRYPTION_KEY (input hidden)"));
+      const count = rotateProfileSecretEnvelopes(profileIds, context.repository, oldKey, newKey);
       console.log(`Re-encrypted ${count} profile secret(s).`);
     } finally { context.repository.close(); }
   });
 
+function parsePort(value: string): number {
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new Error("--port must be an integer from 0 to 65535.");
+  return port;
+}
+
 program.command("ui").description("Start the local full-featured admin dashboard and API.")
   .option("--port <port>", "local loopback port", "4173")
-  .action(async (options: { port: string }) => {
-    const port = Number(options.port);
-    if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new Error("--port must be an integer from 0 to 65535.");
-    await startAdminServer({ port });
+  .option("--open", "open the dashboard in your default browser once it is running")
+  .action(async (options: { port: string; open?: boolean }) => {
+    const instance = await startAdminServer({ port: parsePort(options.port) });
+    if (options.open) openInBrowser(instance.address);
+  });
+
+program.command("start").description("One-step launch: build the dashboard on first run, create the encryption key if needed, start the local service, and open it in your browser. If Trex is already running, only the browser is opened.")
+  .option("--port <port>", "local loopback port", "4173")
+  .option("--no-open", "do not open a browser window")
+  .option("--rebuild", "rebuild the dashboard bundle before starting")
+  .action(async (options: { port: string; open: boolean; rebuild?: boolean }) => {
+    const port = parsePort(options.port);
+    const address = `http://127.0.0.1:${port}`;
+    const show = (url: string) => {
+      if (options.open && openInBrowser(url)) console.log(`Opened ${url} in your browser.`);
+      else console.log(`Open ${url} in your browser.`);
+    };
+    if (port !== 0) {
+      const state = await probeDashboard(address);
+      if (state === "running") { console.log(`Trex is already running at ${address}.`); show(address); return; }
+      if (state === "occupied") throw new Error(`Port ${port} is used by another program. Start Trex on another port, for example \`trex start --port 4174\`.`);
+    }
+    if (options.rebuild || !dashboardIsBuilt()) await buildDashboard();
+    const instance = await startAdminServer({ port });
+    show(instance.address);
   });
 
 const configCommand = program.command("config").description("Inspect or update local CLI configuration.");

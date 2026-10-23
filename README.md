@@ -16,36 +16,29 @@ The model agents are read-only. They can inspect provided evidence and completed
 
 ### Start the dashboard
 
-Requirements: Bun 1.2 or newer and network access for package installation and exchange/model APIs. Clone the repo and install its workspaces:
+Requirements: network access for package installation and exchange/model APIs. Everything else (Bun, dependencies, the dashboard build, and the encryption key) is handled by one command.
+
+**Windows** (PowerShell):
 
 ```powershell
-git clone https://github.com/mhbdev/trex.git
-cd trex
-bun install
-# Run once for this database. Store the printed key in a password manager or OS secret store.
-bun run trex secrets generate-key
+irm https://raw.githubusercontent.com/mhbdev/trex/main/setup.ps1 | iex
 ```
 
-Set the saved key in each terminal session before starting Trex. PowerShell prompts without echoing the value:
-
-```powershell
-$secureKey = Read-Host "ENCRYPTION_KEY from your secret store" -AsSecureString
-$env:ENCRYPTION_KEY = [System.Net.NetworkCredential]::new("", $secureKey).Password
-bun run ui
-```
-
-On macOS or Linux, use a hidden prompt in Bash and then start the dashboard:
+**macOS or Linux**:
 
 ```bash
-read -rsp "ENCRYPTION_KEY from your secret store: " ENCRYPTION_KEY; printf '\n'; export ENCRYPTION_KEY
-bun run ui
+curl -fsSL https://raw.githubusercontent.com/mhbdev/trex/main/setup.sh | bash
 ```
 
-Open `http://127.0.0.1:4173`. In **Profiles and settings**, choose the active profile and configure an AI provider, model, provider key, and approved market symbols. Save, then use **System health** to validate the setup. Start with a backtest or shadow run to exercise the agents and virtual portfolio without sending exchange orders. Model API calls may still incur provider charges. Shadow uses live Wallex market data; backtest uses historical candles.
+The script installs Bun if it is missing, downloads Trex into `~/trex` (set `TREX_HOME` to pick another folder), installs dependencies, builds the dashboard on first run, starts the local service, and opens `http://127.0.0.1:4173` in your browser. Run the same command again whenever you want Trex: if it is already running, the command just opens the dashboard; otherwise it starts it. Press Ctrl+C in that terminal to stop the service.
 
-The key must stay the same for this database. Generate it once, save it outside the repository and database, and load that saved value whenever Trex starts. Generating a replacement key makes existing encrypted credentials unreadable. If the key is lost, those credentials cannot be recovered. Closing the browser leaves engine work running; stopping the local service requests a graceful stop for managed runs.
+From an existing clone, run `.\setup.ps1` (or double-click `setup.cmd`) on Windows and `./setup.sh` on macOS or Linux. With Bun already installed, `bun run start` does the same from the project folder; `bun run start -- --port 4174` chooses another port and `--no-open` skips the browser.
 
-The dashboard and CLI use the same SQLite database and named configuration profiles. Runtime settings and provider/exchange credentials come from the active database profile; dotenv files are not loaded during normal startup. To migrate an existing `.env`, first provide the external `ENCRYPTION_KEY`, then use `bun run trex profile import-dotenv <path> --name <profile>`. The importer validates and stores recognized settings, verifies encrypted credentials, then removes imported assignments from the source file. The dashboard can run diagnostics, validate settings, inspect markets, start backtests and shadow or explicitly confirmed live runs, review reports, and cancel linked live orders.
+In **Profiles and settings**, choose the active profile and configure an AI provider, model, provider key, and approved market symbols. Save, then use **System health** to validate the setup. Start with a backtest or shadow run to exercise the agents and virtual portfolio without sending exchange orders. Model API calls may still incur provider charges. Shadow uses live Wallex market data; backtest uses historical candles.
+
+**Encryption key.** Stored credentials are encrypted with a key that Trex creates automatically on first run and keeps in `trex-encryption.key` next to the database (see the database location below). Back up that file together with the database: without it, stored credentials cannot be recovered. `bun run trex secrets status` shows where the active key comes from, and `bun run trex secrets rekey` (or the **Rotate key** button on the Profiles page) generates a new key, re-encrypts stored credentials, and updates the file. Operators who prefer an OS or service secret manager can set `ENCRYPTION_KEY` instead (a 43-character base64url key from `bun run trex secrets generate-key`); when it is set, Trex uses it and never writes a key file. Closing the browser leaves engine work running; stopping the local service requests a graceful stop for managed runs.
+
+The dashboard and CLI use the same SQLite database and named configuration profiles. Runtime settings and provider/exchange credentials come from the active database profile; dotenv files are not loaded during normal startup. To migrate an existing `.env`, use `bun run trex profile import-dotenv <path> --name <profile>`. The importer validates and stores recognized settings, verifies encrypted credentials, then removes imported assignments from the source file. The dashboard can run diagnostics, validate settings, inspect markets, start backtests and shadow or explicitly confirmed live runs, review reports, and cancel linked live orders.
 
 ### Use the CLI
 
@@ -87,7 +80,7 @@ bun run trex config set ENGINE_STRATEGIES_JSON '[{"id":"momentum-lite","name":"M
 bun run trex config unset AI_API_KEY
 ```
 
-Use named profiles for independent environments: `trex profile list`, `trex profile create "Shadow lab"`, `trex profile use <profile-id>`, and `trex profile delete <profile-id>`. The active database profile is the runtime source of truth. The precedence is **one-command CLI overrides → active database profile → built-in defaults**. CLI options and `--set KEY=VALUE` affect that invocation only; dashboard edits and `trex config set` persist to the active profile. Provider, Wallex, and data-source credentials are encrypted in SQLite and never returned to the browser. Two bootstrap values are intentionally outside profiles: `DATABASE_URL` selects the database before it can be opened, and `ENCRYPTION_KEY` protects encrypted profile secrets. Keep the key in an OS/service secret manager; do not place it in SQLite or dotenv. `profile import-dotenv` is a one-time migration helper; dotenv files are never loaded during normal CLI or dashboard startup.
+Use named profiles for independent environments: `trex profile list`, `trex profile create "Shadow lab"`, `trex profile use <profile-id>`, and `trex profile delete <profile-id>`. The active database profile is the runtime source of truth. The precedence is **one-command CLI overrides → active database profile → built-in defaults**. CLI options and `--set KEY=VALUE` affect that invocation only; dashboard edits and `trex config set` persist to the active profile. Provider, Wallex, and data-source credentials are encrypted in SQLite and never returned to the browser. Two bootstrap values are intentionally outside profiles: `DATABASE_URL` selects the database before it can be opened, and the encryption key protects encrypted profile secrets. Trex manages that key in a file beside the database; operators who prefer a secret manager can supply `ENCRYPTION_KEY`, which always takes precedence. Never place the key in SQLite or a dotenv file. `profile import-dotenv` is a one-time migration helper; dotenv files are never loaded during normal CLI or dashboard startup.
 
 Operational commands accept one-run overrides such as `--ai-provider`, `--ai-model`, `--ai-base-url`, `--boxapi-api-key`, `--boxapi-base-url`, `--liara-api-key`, `--liara-workspace-id`, `--liara-base-url`, `--wallex-api-key`, `--wallex-sub-account-client-id`, `--wallex-package-id`, `--wallex-allowed-markets`, `--live-trading`, `--auto-trading`, `--strategy-profiles-json`, `--max-debate-rounds`, `--max-risk-discuss-rounds`, `--memory-holding-period-bars`, `--memory-benchmark-symbol`, and `--paper-initial-cash`. `--set KEY=VALUE` supports any validated database setting, including role model JSON and risk caps. Named CLI options take precedence over `--set`; command-line values override the selected profile only for that invocation. `--database-url` selects the SQLite database before profile loading and is not stored in the database. The `config set` command saves values to the active encrypted profile; secret values are masked when prompted and encrypted before SQLite persistence. Command-line secret arguments may appear in shell history and process listings, so prefer a masked prompt or the dashboard's write-only credential fields.
 
