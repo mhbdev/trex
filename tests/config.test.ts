@@ -80,3 +80,14 @@ describe("production configuration validation", () => {
   });
 });
 
+
+describe("OpenRouter provider", () => {
+  test("is an independent OpenAI-compatible provider with its own key and base URL", () => {
+    const config = loadConfig({ AI_PROVIDER: "openrouter", AI_MODEL: "openai/gpt-4.1-mini", OPENROUTER_API_KEY: "router-key" });
+    expect(config.ai.openRouterBaseUrl).toBe("https://openrouter.ai/api/v1");
+    expect(config.ai.providerKeys.openrouter).toBe("router-key");
+    expect(validateModeConfig(config, "shadow")).toEqual([]);
+    expect(loadConfig({ AI_PROVIDER_KEYS_JSON: JSON.stringify({ openrouter: "json-key" }) }).ai.providerKeys.openrouter).toBe("json-key");
+    expect(validateModeConfig(loadConfig({ AI_PROVIDER: "openrouter", AI_MODEL: "openai/gpt-4.1-mini" }), "shadow").join(" ")).toContain("openrouter");
+  });
+});

@@ -3,10 +3,10 @@ import { Plus, Trash2 } from "lucide-react";
 import { AppSelect, FieldLabelInfo } from "./ui-primitives";
 
 const roles = ["market_technical_analyst", "news_analyst", "sentiment_analyst", "tokenomics_analyst", "bull_researcher", "bear_researcher", "research_manager", "trader", "aggressive_risk_analyst", "conservative_risk_analyst", "neutral_risk_analyst", "portfolio_manager", "reflector"];
-const providers = ["openai", "anthropic", "google", "compatible", "boxapi", "liara"];
+const providers = ["openai", "anthropic", "google", "compatible", "boxapi", "liara", "openrouter"];
 function providerLabel(provider: string, fa: boolean) {
   if (provider === "compatible") return fa ? "سرویس سازگار با OpenAI" : "OpenAI-compatible service";
-  return provider === "boxapi" ? "BoxAPI" : provider === "liara" ? "Liara" : provider[0]!.toUpperCase() + provider.slice(1);
+  return provider === "boxapi" ? "BoxAPI" : provider === "liara" ? "Liara" : provider === "openrouter" ? "OpenRouter" : provider[0]!.toUpperCase() + provider.slice(1);
 }
 type Route = { role: string; provider: string; model: string };
 function parse(value: string): Route[] | null {

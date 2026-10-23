@@ -46,6 +46,7 @@ function buildRegistry(config: EngineConfig, fetcher: typeof fetch = fetch) {
   const compatibleKey = keyFor("compatible");
   const boxApiKey = keyFor("boxapi");
   const liaraKey = keyFor("liara");
+  const openRouterKey = keyFor("openrouter");
   const liaraBaseUrl = `${config.ai.liaraBaseUrl}/api/${encodeURIComponent(config.ai.liaraWorkspaceId ?? "")}/v1`;
   const providers = {
     openai: createOpenAI(openaiKey ? { apiKey: openaiKey } : {}),
@@ -62,6 +63,15 @@ function buildRegistry(config: EngineConfig, fetcher: typeof fetch = fetch) {
       name: "boxapi",
       ...(boxApiKey ? { apiKey: boxApiKey } : {}),
       baseURL: config.ai.boxApiBaseUrl,
+      fetch: fetcher,
+      supportsStructuredOutputs: true,
+    }),
+    openrouter: createOpenAICompatible({
+      name: "openrouter",
+      ...(openRouterKey ? { apiKey: openRouterKey } : {}),
+      baseURL: config.ai.openRouterBaseUrl,
+      // OpenRouter attributes usage to the calling app through these optional headers.
+      headers: { "HTTP-Referer": "https://github.com/mhbdev/trex", "X-Title": "Trex" },
       fetch: fetcher,
       supportsStructuredOutputs: true,
     }),

@@ -25,6 +25,11 @@ describe("AI SDK gateway adapters", () => {
       expectedUrl: "https://ai.liara.ir/api/workspace-123/v1/chat/completions", expectedModel: "openai/gpt-5",
       env: { AI_PROVIDER: "liara", AI_MODEL: "openai/gpt-5", LIARA_API_KEY: "liara-test-key", LIARA_WORKSPACE_ID: "workspace-123" },
     },
+    {
+      name: "OpenRouter", provider: "openrouter", modelId: "openai/gpt-4.1-mini", key: "router-test-key",
+      expectedUrl: "https://openrouter.ai/api/v1/chat/completions", expectedModel: "openai/gpt-4.1-mini",
+      env: { AI_PROVIDER: "openrouter", AI_MODEL: "openai/gpt-4.1-mini", OPENROUTER_API_KEY: "router-test-key" },
+    },
   ])("routes $name requests through its configured OpenAI-compatible endpoint", async ({ env, expectedUrl, expectedModel, key }) => {
     const requests: Array<{ url: string; authorization: string | null; body: Record<string, unknown> }> = [];
     const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
