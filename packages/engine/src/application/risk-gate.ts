@@ -1,5 +1,6 @@
 import Decimal from "decimal.js";
 import type { MarketQuote, MarketSpec, OrderProposal, PortfolioState, RiskLimits, RiskResult } from "../domain/types.ts";
+import { sellCapacity } from "../domain/pair-limits.ts";
 
 export interface RiskCheckInput {
   order: OrderProposal;
@@ -126,6 +127,14 @@ export function evaluateOrderRisk(input: RiskCheckInput): RiskResult {
   const sellableQty = new Decimal(currentPosition?.availableQuantity ?? currentPosition?.quantity ?? "0");
   const nextQty = order.side === "BUY" ? currentQty.plus(quantity) : currentQty.minus(quantity);
   if (order.side === "SELL" && quantity.gt(sellableQty)) reasons.push("Spot sell quantity exceeds the available position.");
+  // Operator-defined per-pair limits: a reserved holding that is never sold, caps on one sell, and a buy budget.
+  const pairLimit = limits.pairLimits?.[order.symbol];
+  if (pairLimit && order.side === "SELL") {
+    const capacity = sellCapacity(pairLimit, currentQty, sellableQty);
+    if (capacity.reserved.gt(0) && currentQty.minus(quantity).lt(capacity.reserved)) reasons.push(`Sell would leave less than the reserved ${capacity.reserved.toFixed()} ${market.baseAsset} holding for ${order.symbol}.`);
+    if (capacity.maxPerOrder !== undefined && quantity.gt(capacity.maxPerOrder)) reasons.push(`Sell quantity exceeds the per-cycle sell limit for ${order.symbol} (${capacity.maxPerOrder.toFixed()} ${market.baseAsset}).`);
+  }
+  if (pairLimit?.maxBuyNotional !== undefined && order.side === "BUY" && notional.gt(pairLimit.maxBuyNotional)) reasons.push(`Buy value exceeds the per-pair buy budget for ${order.symbol} (${pairLimit.maxBuyNotional} ${market.quoteAsset}).`);
   if (nextQty.mul(price).gt(limits.maxPositionNotional)) reasons.push("Maximum position notional exceeded.");
   const buyCashRequired = notional.plus(notional.mul(limits.feeBufferBps).div(10_000));
   if (order.side === "BUY" && buyCashRequired.gt(portfolio.cash)) reasons.push("Insufficient available quote-currency cash including the configured fee buffer.");

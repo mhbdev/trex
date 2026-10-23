@@ -79,3 +79,29 @@ describe("deterministic risk gate", () => {
   });
 });
 
+
+describe("per-pair sell limits in the risk gate", () => {
+  const allowed = new Set(["BTCUSDT"]);
+  const pairLimits = { BTCUSDT: { reservedBase: "1.5", maxSellPct: "50", maxBuyNotional: "150" } };
+  const limited: RiskLimits = { ...limits, pairLimits };
+
+  test("keeps the reserved holding and caps one sell at the per-cycle limit", () => {
+    const small = evaluateOrderRisk({ order: { symbol: "BTCUSDT", side: "SELL", type: "LIMIT", quantity: "0.4", price: "100.00" }, market, quote, portfolio, allowedMarkets: allowed, limits: limited, now: 10_000 });
+    expect(small.approved).toBe(true);
+    const intoReserve = evaluateOrderRisk({ order: { symbol: "BTCUSDT", side: "SELL", type: "LIMIT", quantity: "0.6", price: "100.00" }, market, quote, portfolio, allowedMarkets: allowed, limits: limited, now: 10_000 });
+    expect(intoReserve.approved).toBe(false);
+    expect(intoReserve.reasons.join(" ")).toContain("reserved 1.5 BTC holding");
+    const tooLarge = evaluateOrderRisk({ order: { symbol: "BTCUSDT", side: "SELL", type: "LIMIT", quantity: "1.2", price: "100.00" }, market, quote, portfolio, allowedMarkets: allowed, limits: limited, now: 10_000 });
+    expect(tooLarge.reasons.join(" ")).toContain("per-cycle sell limit for BTCUSDT (1 BTC)");
+  });
+
+  test("caps one buy at the per-pair budget and ignores pairs without limits", () => {
+    const withinBudget = evaluateOrderRisk({ order: { symbol: "BTCUSDT", side: "BUY", type: "LIMIT", quantity: "1", price: "100.00" }, market, quote, portfolio, allowedMarkets: allowed, limits: limited, now: 10_000 });
+    expect(withinBudget.approved).toBe(true);
+    const overBudget = evaluateOrderRisk({ order: { symbol: "BTCUSDT", side: "BUY", type: "LIMIT", quantity: "2", price: "100.00" }, market, quote, portfolio, allowedMarkets: allowed, limits: limited, now: 10_000 });
+    expect(overBudget.approved).toBe(false);
+    expect(overBudget.reasons.join(" ")).toContain("per-pair buy budget for BTCUSDT (150 USDT)");
+    const unaffected = evaluateOrderRisk({ order: { symbol: "BTCUSDT", side: "BUY", type: "LIMIT", quantity: "2", price: "100.00" }, market, quote, portfolio, allowedMarkets: allowed, limits: { ...limits, pairLimits: { ETHUSDT: { maxBuyNotional: "1" } } }, now: 10_000 });
+    expect(unaffected.approved).toBe(true);
+  });
+});

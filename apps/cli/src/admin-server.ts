@@ -20,6 +20,7 @@ import { aggregateRunReports, compareRuns } from "@trex/engine/application/repor
 import { renderBenchmarkHtml } from "@trex/engine/application/visualization";
 import { engineEnvironmentKeys, loadConfig, validateAutoTradeRequest, validateModeConfig, type EngineConfig } from "@trex/engine/domain/config";
 import { normalizeMarketSymbol } from "@trex/engine/domain/market-symbol";
+import { assertPairLimitsTighten, parsePairLimits } from "@trex/engine/domain/pair-limits";
 import { StrategyProfileSchema, selectStrategy } from "@trex/engine/domain/strategies";
 import type { RunReport } from "@trex/engine/domain/types";
 import { runBacktest } from "@trex/engine/modes/backtest";
@@ -50,7 +51,7 @@ const settingGroups: Record<string, string> = {
   WALLEX_ENABLE_LIVE_TRADING: "Wallex", WALLEX_ENABLE_AUTOTRADING: "Wallex", LIVE_MAX_GROSS_EXPOSURE: "Wallex",
   RISK_MAX_ORDER_NOTIONAL: "Risk & safety", RISK_MAX_POSITION_NOTIONAL: "Risk & safety", RISK_MAX_GROSS_EXPOSURE: "Risk & safety",
   RISK_MAX_DRAWDOWN_PCT: "Risk & safety", RISK_MAX_DAILY_LOSS: "Risk & safety", RISK_MAX_DATA_AGE_SECONDS: "Risk & safety",
-  RISK_FEE_BUFFER_BPS: "Risk & safety", RISK_MAX_MARKET_SLIPPAGE_BPS: "Risk & safety", RISK_KILL_SWITCH: "Risk & safety",
+  RISK_FEE_BUFFER_BPS: "Risk & safety", RISK_MAX_MARKET_SLIPPAGE_BPS: "Risk & safety", RISK_KILL_SWITCH: "Risk & safety", RISK_PAIR_LIMITS_JSON: "Risk & safety",
   ENGINE_STRATEGIES_JSON: "Strategies", MEMORY_HOLDING_PERIOD_BARS: "Memory", MEMORY_BENCHMARK_SYMBOL: "Memory",
   PAPER_INITIAL_CASH: "Simulation", BACKTEST_FEE_BPS: "Simulation", BACKTEST_SLIPPAGE_BPS: "Simulation",
   RESEARCH_REDDIT_ENABLED: "Data sources", RESEARCH_STOCKTWITS_ENABLED: "Data sources",
@@ -86,6 +87,7 @@ function envValue(config: EngineConfig): Record<string, string> {
     RISK_MAX_DAILY_LOSS: config.risk.maxDailyLoss, RISK_MAX_DATA_AGE_SECONDS: String(config.risk.maxDataAgeSeconds),
     RISK_FEE_BUFFER_BPS: config.risk.feeBufferBps, RISK_MAX_MARKET_SLIPPAGE_BPS: config.risk.maxMarketSlippageBps,
     RISK_KILL_SWITCH: String(config.risk.killSwitch),
+    RISK_PAIR_LIMITS_JSON: JSON.stringify(config.risk.pairLimits ?? {}, null, 2),
   };
 }
 
@@ -237,11 +239,15 @@ class RunManager {
     }
     const baseConfig = loadConfig(baseEnvironment);
     if (request.mode === "live") {
-      const liveOverrideKeys = new Set(["RISK_MAX_ORDER_NOTIONAL", "RISK_MAX_POSITION_NOTIONAL", "RISK_MAX_GROSS_EXPOSURE", "RISK_MAX_DRAWDOWN_PCT", "RISK_MAX_DAILY_LOSS", "LIVE_MAX_GROSS_EXPOSURE", "RISK_KILL_SWITCH"]);
+      const liveOverrideKeys = new Set(["RISK_MAX_ORDER_NOTIONAL", "RISK_MAX_POSITION_NOTIONAL", "RISK_MAX_GROSS_EXPOSURE", "RISK_MAX_DRAWDOWN_PCT", "RISK_MAX_DAILY_LOSS", "LIVE_MAX_GROSS_EXPOSURE", "RISK_KILL_SWITCH", "RISK_PAIR_LIMITS_JSON"]);
       for (const key of overrideKeys) {
         if (!liveOverrideKeys.has(key)) throw new Error(`Live per-run override '${key}' is not permitted. Live overrides may only tighten risk limits.`);
         if (key === "RISK_KILL_SWITCH") {
           if (baseConfig.risk.killSwitch && request.overrides[key] !== "true") throw new Error("A per-run setting cannot disable the profile kill switch.");
+          continue;
+        }
+        if (key === "RISK_PAIR_LIMITS_JSON") {
+          assertPairLimitsTighten(baseConfig.risk.pairLimits ?? {}, parsePairLimits(request.overrides[key]));
           continue;
         }
         const base = key === "LIVE_MAX_GROSS_EXPOSURE" ? baseConfig.wallex.liveMaxGrossExposure

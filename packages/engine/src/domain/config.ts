@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { ModeSchema, RoleSchema, type AgentRole, type EngineMode, type RiskLimits } from "./types.ts";
 import { parseStrategyProfiles, type StrategyProfile } from "./strategies.ts";
 import { normalizeMarketSymbol } from "./market-symbol.ts";
+import { parsePairLimits } from "./pair-limits.ts";
 
 export type AiProviderId = "openai" | "anthropic" | "google" | "compatible" | "boxapi" | "liara";
 
@@ -95,6 +96,7 @@ const envSchema = z.object({
   RISK_FEE_BUFFER_BPS: z.string().regex(/^\d+(\.\d+)?$/).default("50"),
   RISK_MAX_MARKET_SLIPPAGE_BPS: z.string().regex(/^\d+(\.\d+)?$/).default("50"),
   RISK_KILL_SWITCH: bool(false),
+  RISK_PAIR_LIMITS_JSON: z.string().default("{}"),
 });
 
 export type EngineEnvironmentKey = Exclude<keyof z.infer<typeof envSchema>, "DATABASE_URL">;
@@ -155,6 +157,7 @@ const jsonEnvironmentKeys = [
   "ENGINE_STRATEGIES_JSON",
   "RESEARCH_ENDPOINTS_JSON",
   "MARKET_QUOTE_FALLBACKS_JSON",
+  "RISK_PAIR_LIMITS_JSON",
 ] as const;
 
 /** Recover legacy JSON settings written with dotenv's unsupported escaped-quote form. */
@@ -273,6 +276,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>> = {
       feeBufferBps: parsed.RISK_FEE_BUFFER_BPS,
       maxMarketSlippageBps: parsed.RISK_MAX_MARKET_SLIPPAGE_BPS,
       killSwitch: parsed.RISK_KILL_SWITCH,
+      pairLimits: parsePairLimits(parsed.RISK_PAIR_LIMITS_JSON),
     },
   };
   return cfg;
