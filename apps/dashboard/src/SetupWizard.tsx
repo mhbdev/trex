@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, Cpu, Gauge, LoaderCircle, Search, Shield, Sparkles, WalletCards } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Blocks, Check, Cpu, Gauge, LoaderCircle, Search, Shield, Sparkles, WalletCards } from "lucide-react";
 import { api } from "./api";
 import { AppSelect, FieldLabelInfo } from "./ui-primitives";
 
@@ -27,8 +27,10 @@ export function setupNeeded(config: { ai?: { apiKeyConfigured?: boolean }; walle
   return !config.ai?.apiKeyConfigured || !(config.wallex?.allowedMarkets?.length);
 }
 
-export function SetupWizard({ locale, profileId, profileName, fields, secrets, helpers, notify, onRefresh, onFinish, onDismiss }: {
+export function SetupWizard({ locale, profileId, profileName, fields, secrets, helpers, teamStep, notify, onRefresh, onFinish, onDismiss }: {
   locale: Locale; profileId: string; profileName: string; fields: Field[]; secrets: SecretState; helpers: Helpers;
+  /** The agents-and-strategies editor, rendered by the app so the wizard reuses the full-featured views. */
+  teamStep: ReactNode;
   notify: (message: string) => void; onRefresh: () => void; onFinish: () => void; onDismiss: () => void;
 }) {
   const tx = (fa: string, en: string) => locale === "fa" ? fa : en;
@@ -97,7 +99,7 @@ export function SetupWizard({ locale, profileId, profileName, fields, secrets, h
       setError(caught instanceof Error ? helpers.errorText(caught.message, locale) : tx("بررسی انجام نشد.", "The checks could not run."));
     } finally { setChecking(false); }
   };
-  useEffect(() => { if (step === 2) void runChecks(); }, [step]);
+  useEffect(() => { if (step === 3) void runChecks(); }, [step]);
 
   const stepOneProblem = (): string => {
     if (!model.trim()) return tx("نام مدل را وارد کنید.", "Enter the model ID.");
@@ -133,7 +135,7 @@ export function SetupWizard({ locale, profileId, profileName, fields, secrets, h
       if (wallexApiKey.trim()) credentials.wallexApiKey = wallexApiKey.trim();
       if (subAccountClientId.trim()) credentials.subAccountClientId = subAccountClientId.trim();
       if (Object.keys(credentials).length) await api(`/api/profiles/${encodeURIComponent(profileId)}`, { method: "PUT", body: JSON.stringify({ secrets: credentials }) });
-      setWallexApiKey(""); setSubAccountClientId(""); onRefresh(); setStep(2);
+      setWallexApiKey(""); setSubAccountClientId(""); onRefresh(); setStep(2); window.scrollTo({ top: 0 });
     } catch (caught) { setError(caught instanceof Error ? helpers.errorText(caught.message, locale) : tx("ذخیره انجام نشد.", "Saving failed.")); }
     finally { setSaving(false); }
   };
@@ -152,12 +154,13 @@ export function SetupWizard({ locale, profileId, profileName, fields, secrets, h
   const steps = [
     { title: tx("هوش مصنوعی", "AI provider"), hint: tx("سرویس، مدل و کلید", "Service, model, and key"), icon: Cpu },
     { title: tx("والکس", "Wallex"), hint: tx("جفت‌ارزها و دسترسی حساب", "Markets and account access"), icon: WalletCards },
+    { title: tx("دستیارها و استراتژی‌ها", "Agents & strategies"), hint: tx("مدل هر دستیار و مأموریت‌ها", "Models per agent and mandates"), icon: Blocks },
     { title: tx("بررسی", "Check"), hint: tx("اعتبارسنجی و سلامت", "Validation and health"), icon: Gauge },
   ];
   const failedChecks = diagnostics?.checks.filter((check) => check.status === "fail") ?? [];
 
   return <div className="wizard">
-    <div className="page-heading"><div><h1>{tx("راه‌اندازی سریع", "Quick setup")}</h1><p className="muted">{tx(`سه قدم تا اولین شبیه‌سازی در پروفایل «${profileName}». کلیدها رمزگذاری می‌شوند و بعداً می‌توانید هر مورد را در صفحهٔ پروفایل‌ها تغییر دهید.`, `Three steps to your first simulation in the "${profileName}" profile. Credentials are encrypted, and everything can be changed later on the Profiles page.`)}</p></div><button className="text-button" onClick={onDismiss}>{tx("بعداً انجام می‌دهم", "Skip for now")}</button></div>
+    <div className="page-heading"><div><h1>{tx("راه‌اندازی سریع", "Quick setup")}</h1><p className="muted">{tx(`چهار قدم تا اولین شبیه‌سازی در پروفایل «${profileName}». کلیدها رمزگذاری می‌شوند و بعداً می‌توانید هر مورد را در صفحهٔ پروفایل‌ها یا دستیارها و استراتژی‌ها تغییر دهید.`, `Four steps to your first simulation in the "${profileName}" profile. Credentials are encrypted, and everything can be changed later on the Profiles or Agents & strategies pages.`)}</p></div><button className="text-button" onClick={onDismiss}>{tx("بعداً انجام می‌دهم", "Skip for now")}</button></div>
     <div className="wizard-steps" role="list">{steps.map((item, index) => <div key={item.title} role="listitem" className={`wizard-step ${index === step ? "active" : index < step ? "done" : ""}`} aria-current={index === step ? "step" : undefined}><span className="wizard-step-index">{index < step ? <Check size={13}/> : index + 1}</span><span><b>{item.title}</b><small>{item.hint}</small></span></div>)}</div>
 
     {error && <div className="notice warning" role="alert"><span className="notice-icon"><AlertTriangle size={17}/></span><div><b>{tx("ادامه ممکن نیست", "Cannot continue yet")}</b><p>{error}</p></div></div>}
@@ -196,7 +199,13 @@ export function SetupWizard({ locale, profileId, profileName, fields, secrets, h
       <div className="wizard-actions"><button className="button secondary" onClick={() => { setError(""); setStep(0); }} disabled={saving}><ArrowLeft size={15}/>{tx("قبلی", "Back")}</button><div><button className="button primary" onClick={() => void saveStepTwo()} disabled={saving || marketsQuery.isPending}>{saving ? <LoaderCircle className="spin" size={15}/> : <ArrowRight size={15}/>}{tx("ذخیره و ادامه", "Save and continue")}</button></div></div>
     </section>}
 
-    {step === 2 && <section className="card">
+    {step === 2 && <section className="card wizard-team">
+      <div className="card-heading"><div><h2><Blocks size={17}/>{tx("تیم دستیارها و استراتژی‌ها", "Agent team and strategies")}</h2><small className="muted">{tx("پیش‌فرض‌ها برای شروع کافی‌اند. همین‌جا می‌توانید مدل هر دستیار، راهنمای نقش‌ها و مأموریت استراتژی‌ها را ببینید و تغییر دهید؛ هر بخش دکمهٔ ذخیرهٔ خودش را دارد، پس پیش از ادامه تغییرات را ذخیره کنید.", "The defaults are enough to start. Here you can review and change each agent's model, the role guidance, and the strategies' mandates; each section has its own Save button, so save before continuing.")}</small></div></div>
+      {teamStep}
+      <div className="wizard-actions"><button className="button secondary" onClick={() => { setError(""); setStep(1); }}><ArrowLeft size={15}/>{tx("قبلی", "Back")}</button><div><button className="button primary" onClick={() => { setError(""); setStep(3); window.scrollTo({ top: 0 }); }}><ArrowRight size={15}/>{tx("ادامه به بررسی", "Continue to checks")}</button></div></div>
+    </section>}
+
+    {step === 3 && <section className="card">
       <div className="card-heading"><div><h2><Gauge size={17}/>{tx("بررسی نهایی", "Final check")}</h2><small className="muted">{tx("تنظیمات شبیه‌سازی اعتبارسنجی و دسترسی خواندنی والکس آزمایش می‌شود. مدلی فراخوانی نمی‌شود و سفارشی ثبت نمی‌شود.", "Validates the simulation settings and tests read-only Wallex access. No model is called and no order is placed.")}</small></div></div>
       <dl className="wizard-summary">
         <div><dt>{tx("سرویس و مدل", "Provider and model")}</dt><dd dir="ltr">{provider} · {model || fieldValue("AI_MODEL")}</dd></div>
@@ -207,7 +216,7 @@ export function SetupWizard({ locale, profileId, profileName, fields, secrets, h
       {diagnostics && <div className="diagnostic-list"><h3>{tx("نتیجهٔ بررسی‌ها", "Check results")}</h3>{diagnostics.checks.map((check) => <div className="diagnostic-row" key={check.name}><span className={`status status-${check.status === "fail" ? "failed" : check.status}`}>{helpers.statusTitle(check.status, locale)}</span><div><b>{helpers.diagnosticTitle(check.name, locale)}</b><small>{helpers.diagnosticDetailText(check.name, check.status, check.detail, locale)}</small></div></div>)}</div>}
       {!checking && validation && !validation.valid && <p className="form-caption"><AlertTriangle size={14}/>{tx("می‌توانید برگردید و موارد را اصلاح کنید، یا بعداً از صفحهٔ پروفایل‌ها تغییرشان دهید.", "Go back to fix these items, or adjust them later on the Profiles page.")}</p>}
       {!checking && validation?.valid && failedChecks.length === 0 && <div className="notice info"><span className="notice-icon"><Sparkles size={17}/></span><div><b>{tx("همه‌چیز آماده است", "Everything is ready")}</b><p>{tx("با یک آزمایش تاریخی یا شبیه‌سازی زنده شروع کنید؛ هر دو با سرمایهٔ مجازی کار می‌کنند.", "Start with a backtest or a live simulation; both use virtual capital.")}</p></div></div>}
-      <div className="wizard-actions"><button className="button secondary" onClick={() => { setError(""); setStep(1); }} disabled={checking}><ArrowLeft size={15}/>{tx("قبلی", "Back")}</button><div><button className="button secondary" onClick={() => void runChecks()} disabled={checking}><Gauge size={15}/>{tx("بررسی دوباره", "Run checks again")}</button><button className="button primary" onClick={finish} disabled={checking}><Check size={15}/>{tx("پایان و رفتن به آزمایش و اجرا", "Finish and open Run lab")}</button></div></div>
+      <div className="wizard-actions"><button className="button secondary" onClick={() => { setError(""); setStep(2); }} disabled={checking}><ArrowLeft size={15}/>{tx("قبلی", "Back")}</button><div><button className="button secondary" onClick={() => void runChecks()} disabled={checking}><Gauge size={15}/>{tx("بررسی دوباره", "Run checks again")}</button><button className="button primary" onClick={finish} disabled={checking}><Check size={15}/>{tx("پایان و رفتن به آزمایش و اجرا", "Finish and open Run lab")}</button></div></div>
     </section>}
   </div>;
 }

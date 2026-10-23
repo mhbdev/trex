@@ -51,8 +51,12 @@ Categories=Office;Finance;"
     say "Added a Trex shortcut to your desktop"
   }
 
+  download_archive() { have curl || fail "git or curl is required to download Trex."; mkdir -p "$1"; curl -fsSL "$archive_url" | tar -xz --strip-components=1 -C "$1"; }
+  local update=""
+  if [ "${1:-}" = "update" ] || [ -n "${TREX_UPDATE:-}" ]; then update=1; fi
+
   # 1. Find the project: the folder this script lives in, an existing install, or a fresh download.
-  local script_dir="" project_dir=""
+  local script_dir="" project_dir="" downloaded=""
   if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   fi
@@ -68,11 +72,20 @@ Categories=Office;Finance;"
     if have git; then
       git clone --depth 1 "$repo_url" "$install_dir" </dev/null
     else
-      have curl || fail "git or curl is required to download Trex."
-      mkdir -p "$install_dir"
-      curl -fsSL "$archive_url" | tar -xz --strip-components=1 -C "$install_dir"
+      download_archive "$install_dir"
     fi
     project_dir="$install_dir"
+    downloaded=1
+  fi
+
+  # 1b. Update an existing install when asked (./setup.sh update, or TREX_UPDATE=1). Data lives outside the project folder and is untouched.
+  if [ -n "$update" ] && [ -z "$downloaded" ]; then
+    say "Updating Trex in $project_dir"
+    if [ -d "$project_dir/.git" ] && have git; then
+      git -C "$project_dir" pull --ff-only </dev/null || fail "Could not update with git pull. Commit or discard local changes in $project_dir and rerun."
+    else
+      download_archive "$project_dir"
+    fi
   fi
 
   # 2. Bun runtime (https://bun.sh), installed per-user when missing.
@@ -104,6 +117,9 @@ Categories=Office;Finance;"
   fi
 
   say "Starting Trex (press Ctrl+C to stop it)"
+  if [ -n "$update" ]; then
+    exec bun run --no-env-file apps/cli/src/main.ts start --port "$port" --rebuild
+  fi
   exec bun run --no-env-file apps/cli/src/main.ts start --port "$port"
 }
 

@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 
 export const dashboardDirectory = resolve(import.meta.dir, "../../dashboard");
@@ -7,9 +7,29 @@ export function dashboardIsBuilt(directory = dashboardDirectory): boolean {
   return existsSync(resolve(directory, "dist", "index.html"));
 }
 
+function newestModification(path: string): number {
+  const info = statSync(path);
+  if (!info.isDirectory()) return info.mtimeMs;
+  let newest = info.mtimeMs;
+  for (const entry of readdirSync(path, { withFileTypes: true })) {
+    if (entry.name === "node_modules" || entry.name === "dist") continue;
+    newest = Math.max(newest, newestModification(resolve(path, entry.name)));
+  }
+  return newest;
+}
+
+/** True when dashboard sources (or the shared contracts) changed after the last build, for example after `git pull`. */
+export function dashboardIsStale(directory = dashboardDirectory): boolean {
+  const index = resolve(directory, "dist", "index.html");
+  if (!existsSync(index)) return true;
+  const built = statSync(index).mtimeMs;
+  const sources = ["src", "index.html", "vite.config.ts", "package.json", "../../packages/contracts/src"].map((item) => resolve(directory, item));
+  return sources.some((source) => existsSync(source) && newestModification(source) > built);
+}
+
 /** Build the dashboard bundle with the same Bun binary that is running this process. */
 export async function buildDashboard(directory = dashboardDirectory): Promise<void> {
-  console.log("Building the dashboard. This happens once and takes about a minute...");
+  console.log("Building the dashboard. This happens on the first run and after updates, and takes about a minute...");
   const child = Bun.spawn([process.execPath, "run", "--no-env-file", "build"], { cwd: directory, stdin: "ignore", stdout: "inherit", stderr: "inherit" });
   const code = await child.exited;
   if (code !== 0) throw new Error(`Dashboard build failed with exit code ${code}. Run \`bun install\` in the project folder and retry.`);

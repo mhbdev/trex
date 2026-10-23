@@ -42,6 +42,33 @@ On a new profile the dashboard opens **Quick setup**, a three-step wizard: pick 
 
 The dashboard and CLI use the same SQLite database and named configuration profiles. Runtime settings and provider/exchange credentials come from the active database profile; dotenv files are not loaded during normal startup. To migrate an existing `.env`, use `bun run trex profile import-dotenv <path> --name <profile>`. The importer validates and stores recognized settings, verifies encrypted credentials, then removes imported assignments from the source file. The dashboard can run diagnostics, validate settings, inspect markets, start backtests and shadow or explicitly confirmed live runs, review reports, and cancel linked live orders.
 
+### Update
+
+Your database, profiles, run history, and encryption key live outside the project folder, so updating never touches them. The launcher reinstalls dependencies, rebuilds the dashboard when source files changed, and runs any database migrations on the next start.
+
+From a clone, pull and start again:
+
+```powershell
+git pull
+.\setup.ps1
+```
+
+```bash
+git pull && ./setup.sh
+```
+
+Or let the setup script do the pull for you with `.\setup.ps1 update` on Windows and `./setup.sh update` on macOS or Linux. If you installed with the one-line command and never cloned, run it again with the update flag; it fetches the latest code into the same folder (with `git pull` when the folder is a git clone, otherwise by downloading the archive over it):
+
+```powershell
+$env:TREX_UPDATE = 1; irm https://raw.githubusercontent.com/mhbdev/trex/main/setup.ps1 | iex
+```
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mhbdev/trex/main/setup.sh | TREX_UPDATE=1 bash
+```
+
+Stop Trex (Ctrl+C) before updating so the new version starts cleanly; the desktop shortcut keeps working after an update.
+
 ### Uninstall
 
 Trex leaves three things on the computer: the project folder (`~/trex` by default, or wherever you cloned it), the data folder holding the database and the encryption key, and the desktop shortcut. Bun is a separate program and stays installed unless you remove it too. Stop Trex first with Ctrl+C in its terminal, or by closing that window.

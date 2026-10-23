@@ -13,6 +13,7 @@
 #>
 
 function Invoke-TrexSetup {
+  param([switch] $Update)
   $ErrorActionPreference = "Stop"
   $repoUrl = "https://github.com/mhbdev/trex.git"
   $archiveUrl = "https://github.com/mhbdev/trex/archive/refs/heads/main.zip"
@@ -26,8 +27,20 @@ function Invoke-TrexSetup {
     return (Test-Path $manifest) -and ((Get-Content $manifest -Raw) -match '"name":\s*"trex"')
   }
 
+  function Install-TrexArchive([string] $destination) {
+    $temp = [IO.Path]::GetTempPath()
+    $zip = Join-Path $temp "trex-main.zip"
+    $extract = Join-Path $temp ("trex-extract-" + [guid]::NewGuid().ToString("N"))
+    Invoke-WebRequest -Uri $archiveUrl -OutFile $zip -UseBasicParsing
+    Expand-Archive -Path $zip -DestinationPath $extract -Force
+    New-Item -ItemType Directory -Force -Path $destination | Out-Null
+    Get-ChildItem -Force (Join-Path $extract "trex-main") | Copy-Item -Destination $destination -Recurse -Force
+    Remove-Item $zip, $extract -Recurse -Force -ErrorAction SilentlyContinue
+  }
+
   # 1. Find the project: the folder this script lives in, an existing install, or a fresh download.
   $scriptDir = $PSScriptRoot  # empty when the script is piped through Invoke-Expression
+  $downloaded = $false
   if ($scriptDir -and (Test-TrexProject $scriptDir)) {
     $projectDir = $scriptDir
   } elseif (Test-TrexProject $installDir) {
@@ -41,16 +54,21 @@ function Invoke-TrexSetup {
       git clone --depth 1 $repoUrl $installDir
       if ($LASTEXITCODE -ne 0) { throw "git clone failed." }
     } else {
-      $temp = [IO.Path]::GetTempPath()
-      $zip = Join-Path $temp "trex-main.zip"
-      $extract = Join-Path $temp ("trex-extract-" + [guid]::NewGuid().ToString("N"))
-      Invoke-WebRequest -Uri $archiveUrl -OutFile $zip -UseBasicParsing
-      Expand-Archive -Path $zip -DestinationPath $extract -Force
-      New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-      Get-ChildItem -Force (Join-Path $extract "trex-main") | Move-Item -Destination $installDir -Force
-      Remove-Item $zip, $extract -Recurse -Force -ErrorAction SilentlyContinue
+      Install-TrexArchive $installDir
     }
     $projectDir = $installDir
+    $downloaded = $true
+  }
+
+  # 1b. Update an existing install when asked (.\setup.ps1 update, or TREX_UPDATE=1). Data lives outside the project folder and is untouched.
+  if ($Update -and -not $downloaded) {
+    Say "Updating Trex in $projectDir"
+    if ((Test-Path (Join-Path $projectDir ".git")) -and (Have "git")) {
+      git -C $projectDir pull --ff-only
+      if ($LASTEXITCODE -ne 0) { throw "Could not update with git pull. Commit or discard local changes in $projectDir and rerun." }
+    } else {
+      Install-TrexArchive $projectDir
+    }
   }
 
   # 2. Bun runtime (https://bun.sh), installed per-user when missing.
@@ -92,8 +110,13 @@ function Invoke-TrexSetup {
   }
 
   Say "Starting Trex (press Ctrl+C to stop it)"
-  & bun run --no-env-file apps/cli/src/main.ts start --port $port
+  $startArgs = @("run", "--no-env-file", "apps/cli/src/main.ts", "start", "--port", $port)
+  if ($Update) { $startArgs += "--rebuild" }
+  & bun @startArgs
   exit $LASTEXITCODE
 }
 
-Invoke-TrexSetup
+# "update" as an argument, or TREX_UPDATE=1 in the environment (the only option when piped through iex), refreshes an existing install first.
+$requestedUpdate = [bool]$env:TREX_UPDATE -or (@($args) -contains "update") -or (@($args) -contains "-Update")
+if ($env:TREX_UPDATE) { Remove-Item Env:TREX_UPDATE -ErrorAction SilentlyContinue }
+Invoke-TrexSetup -Update:$requestedUpdate
