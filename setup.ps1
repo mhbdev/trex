@@ -72,6 +72,25 @@ function Invoke-TrexSetup {
   Say "Installing dependencies"
   & bun install
   if ($LASTEXITCODE -ne 0) { throw "bun install failed." }
+
+  # 4. Desktop shortcut that runs this same launcher next time (skip with TREX_NO_SHORTCUT=1).
+  if (-not $env:TREX_NO_SHORTCUT) {
+    try {
+      $desktop = [Environment]::GetFolderPath("Desktop")
+      $shortcutPath = if ($desktop) { Join-Path $desktop "Trex.lnk" } else { "" }
+      if ($shortcutPath -and (Test-Path $desktop) -and -not (Test-Path $shortcutPath)) {
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+        $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $projectDir 'setup.ps1')`""
+        $shortcut.WorkingDirectory = $projectDir
+        $shortcut.Description = "Start or open the Trex dashboard"
+        $shortcut.Save()
+        Say "Added a Trex shortcut to your desktop"
+      }
+    } catch { Write-Host "Could not create a desktop shortcut: $($_.Exception.Message)" -ForegroundColor Yellow }
+  }
+
   Say "Starting Trex (press Ctrl+C to stop it)"
   & bun run --no-env-file apps/cli/src/main.ts start --port $port
   exit $LASTEXITCODE

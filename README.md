@@ -1,5 +1,7 @@
 # Trex
 
+[فارسی](README.fa.md)
+
 A Bun and TypeScript modular monolith for crypto market research, decision support, backtesting, shadow trading, and explicitly enabled Wallex credit-account spot execution. Its multi-agent workflow combines parallel market/technical, news, sentiment, and tokenomics/on-chain analysis; bull/bear researchers; a research manager; a trader; aggressive/conservative/neutral risk reviewers; and a portfolio manager.
 
 The model agents are read-only. They can inspect provided evidence and completed candles and return schema-validated findings or proposals. The application workflow is explicit, and only the deterministic risk gate can authorize an order for the live execution adapter.
@@ -30,15 +32,61 @@ irm https://raw.githubusercontent.com/mhbdev/trex/main/setup.ps1 | iex
 curl -fsSL https://raw.githubusercontent.com/mhbdev/trex/main/setup.sh | bash
 ```
 
-The script installs Bun if it is missing, downloads Trex into `~/trex` (set `TREX_HOME` to pick another folder), installs dependencies, builds the dashboard on first run, starts the local service, and opens `http://127.0.0.1:4173` in your browser. Run the same command again whenever you want Trex: if it is already running, the command just opens the dashboard; otherwise it starts it. Press Ctrl+C in that terminal to stop the service.
+The script installs Bun if it is missing, downloads Trex into `~/trex` (set `TREX_HOME` to pick another folder), installs dependencies, builds the dashboard on first run, starts the local service, and opens `http://127.0.0.1:4173` in your browser. Run the same command again whenever you want Trex: if it is already running, the command just opens the dashboard; otherwise it starts it. Press Ctrl+C in that terminal to stop the service. The first run also places a **Trex** shortcut on your desktop that starts or opens Trex the same way (a `.lnk` on Windows, `Trex.command` on macOS, `Trex.desktop` on Linux); set `TREX_NO_SHORTCUT=1` before running the script to skip it.
 
 From an existing clone, run `.\setup.ps1` (or double-click `setup.cmd`) on Windows and `./setup.sh` on macOS or Linux. With Bun already installed, `bun run start` does the same from the project folder; `bun run start -- --port 4174` chooses another port and `--no-open` skips the browser.
 
-In **Profiles and settings**, choose the active profile and configure an AI provider, model, provider key, and approved market symbols. Save, then use **System health** to validate the setup. Start with a backtest or shadow run to exercise the agents and virtual portfolio without sending exchange orders. Model API calls may still incur provider charges. Shadow uses live Wallex market data; backtest uses historical candles.
+On a new profile the dashboard opens **Quick setup**, a three-step wizard: pick the AI provider, model, and API key; choose the Wallex quote currency and allowed markets (Wallex account credentials are an optional section, needed only for the real balance view and live trading); then run the validation and health checks. Credentials are saved encrypted as you go, the wizard can be reopened from the sidebar at any time, and every value can be changed later in **Profiles and settings** or checked in **System health**. Start with a backtest or shadow run to exercise the agents and virtual portfolio without sending exchange orders. Model API calls may still incur provider charges. Shadow uses live Wallex market data; backtest uses historical candles.
 
 **Encryption key.** Stored credentials are encrypted with a key that Trex creates automatically on first run and keeps in `trex-encryption.key` next to the database (see the database location below). Back up that file together with the database: without it, stored credentials cannot be recovered. `bun run trex secrets status` shows where the active key comes from, and `bun run trex secrets rekey` (or the **Rotate key** button on the Profiles page) generates a new key, re-encrypts stored credentials, and updates the file. Operators who prefer an OS or service secret manager can set `ENCRYPTION_KEY` instead (a 43-character base64url key from `bun run trex secrets generate-key`); when it is set, Trex uses it and never writes a key file. Closing the browser leaves engine work running; stopping the local service requests a graceful stop for managed runs.
 
 The dashboard and CLI use the same SQLite database and named configuration profiles. Runtime settings and provider/exchange credentials come from the active database profile; dotenv files are not loaded during normal startup. To migrate an existing `.env`, use `bun run trex profile import-dotenv <path> --name <profile>`. The importer validates and stores recognized settings, verifies encrypted credentials, then removes imported assignments from the source file. The dashboard can run diagnostics, validate settings, inspect markets, start backtests and shadow or explicitly confirmed live runs, review reports, and cancel linked live orders.
+
+### Uninstall
+
+Trex leaves three things on the computer: the project folder (`~/trex` by default, or wherever you cloned it), the data folder holding the database and the encryption key, and the desktop shortcut. Bun is a separate program and stays installed unless you remove it too. Stop Trex first with Ctrl+C in its terminal, or by closing that window.
+
+**Windows** (PowerShell). Remove the project folder and the desktop shortcut, keeping your data:
+
+```powershell
+Remove-Item -Recurse -Force "$HOME\trex"; Remove-Item -Force (Join-Path ([Environment]::GetFolderPath("Desktop")) "Trex.lnk") -ErrorAction SilentlyContinue
+```
+
+To also delete the database, profiles, run history, and the encryption key (stored credentials cannot be recovered afterwards):
+
+```powershell
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\trex", "$env:LOCALAPPDATA\wallex-trading-agents" -ErrorAction SilentlyContinue
+```
+
+To remove Bun as well, delete its folder and drop its entry from your user PATH:
+
+```powershell
+Remove-Item -Recurse -Force "$HOME\.bun"; [Environment]::SetEnvironmentVariable("Path", (([Environment]::GetEnvironmentVariable("Path", "User") -split ";") | Where-Object { $_ -and $_ -notlike "*\.bun\bin*" }) -join ";", "User")
+```
+
+**macOS or Linux** (terminal). Remove the project folder and the shortcuts, keeping your data:
+
+```bash
+rm -rf ~/trex ~/Desktop/Trex.command ~/Desktop/Trex.desktop ~/.local/share/applications/trex.desktop
+```
+
+To also delete the database, profiles, run history, and the encryption key (stored credentials cannot be recovered afterwards), run the line for your system:
+
+```bash
+rm -rf ~/Library/Application\ Support/trex ~/Library/Application\ Support/wallex-trading-agents   # macOS
+```
+
+```bash
+rm -rf ~/.local/share/trex ~/.local/share/wallex-trading-agents   # Linux
+```
+
+To remove Bun as well, delete `~/.bun` and remove the `BUN_INSTALL` and PATH lines the Bun installer added to your shell profile (`~/.bashrc`, `~/.zshrc`, or `~/.profile`):
+
+```bash
+rm -rf ~/.bun
+```
+
+If you installed into another folder with `TREX_HOME`, or ran Trex with a custom `--database-url`, use those paths instead; the key file sits next to that database.
 
 ### Use the CLI
 
