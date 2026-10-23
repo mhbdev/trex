@@ -182,3 +182,51 @@ export function CurrencyPairAvatar({ symbol, quoteCurrency, assetIcons = {} }: {
 export function TooltipProvider({ children }: { children: ReactNode }) {
   return <TooltipPrimitive.Provider delayDuration={350} skipDelayDuration={120}>{children}</TooltipPrimitive.Provider>;
 }
+
+/** Convert Persian/Arabic digits to Latin and strip grouping separators, keeping one decimal point. */
+export function parseAmountInput(text: string): string {
+  const normalized = text
+    .replace(/[۰-۹]/g, (digit) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)))
+    .replace(/[٠-٩]/g, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))
+    .replace(/[,\s٬_']/g, "")
+    .replace(/[^0-9.]/g, "");
+  const [integer = "", ...rest] = normalized.split(".");
+  return rest.length ? `${integer}.${rest.join("")}` : integer;
+}
+
+/** Group the integer part with commas while leaving any fraction exactly as typed. */
+export function formatAmountInput(raw: string): string {
+  if (!raw) return "";
+  const [integer = "", fraction] = raw.split(".");
+  const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return fraction !== undefined ? `${grouped}.${fraction}` : grouped;
+}
+
+function compactAmount(value: number, locale: "fa" | "en"): string {
+  if (Math.abs(value) < 1_000) return "";
+  const units: Array<[number, string, string]> = [[1e9, "B", "میلیارد"], [1e6, "M", "میلیون"], [1e3, "K", "هزار"]];
+  for (const [size, en, fa] of units) {
+    if (Math.abs(value) < size) continue;
+    const scaled = value / size;
+    const text = new Intl.NumberFormat(locale === "fa" ? "fa-IR" : "en-US", { maximumFractionDigits: Math.abs(scaled) >= 100 ? 0 : 1 }).format(scaled);
+    return locale === "fa" ? ` (${text} ${fa})` : ` (${text}${en})`;
+  }
+  return "";
+}
+
+/** Amount field: shows thousands separators while editing, keeps a plain numeric string in state, and echoes the formatted value with its currency. */
+export function MoneyInput({ value, onChange, currency, locale, placeholder, disabled, ariaLabel, id }: {
+  value: string; onChange: (raw: string) => void; currency?: string; locale: "fa" | "en"; placeholder?: string; disabled?: boolean; ariaLabel?: string; id?: string;
+}) {
+  const numeric = Number(value);
+  const caption = value && Number.isFinite(numeric)
+    ? `${new Intl.NumberFormat(locale === "fa" ? "fa-IR" : "en-US", { maximumFractionDigits: 2 }).format(numeric)}${currency ? ` ${currency}` : ""}${compactAmount(numeric, locale)}`
+    : "";
+  return <span className="money-input">
+    <span className="money-input-control">
+      <input id={id} aria-label={ariaLabel} type="text" inputMode="decimal" dir="ltr" autoComplete="off" value={formatAmountInput(value)} placeholder={placeholder} disabled={disabled} onChange={(event) => onChange(parseAmountInput(event.target.value))}/>
+      {currency && <span className="money-input-currency" aria-hidden="true">{currency}</span>}
+    </span>
+    {caption && <small className="money-input-caption" dir="auto">{caption}</small>}
+  </span>;
+}

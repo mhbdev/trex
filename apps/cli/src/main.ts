@@ -8,7 +8,7 @@ import { SqliteRunRepository } from "@trex/engine/adapters/persistence/store";
 import { parseQuoteFallbacks } from "@trex/engine/adapters/providers/quote-failover";
 import { createLiveExecution, createRuntime, createProfileContext, getDatabaseUrl, loadEffectiveConfig, publicConfig } from "./runtime.ts";
 import { ensureEncryptionKey, writeEncryptionKeyFile, type ResolvedEncryptionKey } from "@trex/engine/adapters/security/encryption-key-file";
-import { buildDashboard, dashboardIsBuilt, openInBrowser, probeDashboard } from "./launcher.ts";
+import { buildDashboard, dashboardIsBuilt, dashboardIsStale, openInBrowser, probeDashboard } from "./launcher.ts";
 import { WallexOrderExecutionAdapter } from "@trex/engine/adapters/wallex/rest";
 import { orderIntentState } from "@trex/engine/application/live-execution";
 import { ExecutionLeaseGuard } from "@trex/engine/application/execution-lease";
@@ -250,7 +250,7 @@ program.command("start").description("One-step launch: build the dashboard on fi
       if (state === "running") { console.log(`Trex is already running at ${address}.`); show(address); return; }
       if (state === "occupied") throw new Error(`Port ${port} is used by another program. Start Trex on another port, for example \`trex start --port 4174\`.`);
     }
-    if (options.rebuild || !dashboardIsBuilt()) await buildDashboard();
+    if (options.rebuild || !dashboardIsBuilt() || dashboardIsStale()) await buildDashboard();
     const instance = await startAdminServer({ port });
     show(instance.address);
   });

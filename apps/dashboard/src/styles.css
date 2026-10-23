@@ -1153,3 +1153,30 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, #root::-webkit-scrollbar, .app
 .wizard-summary dd { margin: 4px 0 0; color: var(--text-2); font-size: 10px; overflow-wrap: anywhere; }
 .live-dot.attention { background: var(--amber); box-shadow: 0 0 0 3px rgb(237 194 114 / 12%); }
 @media (max-width: 820px) { .wizard-steps, .wizard-grid, .wizard-summary { grid-template-columns: 1fr; } .wizard-actions { flex-wrap: wrap; } }
+
+/* Amount inputs with live formatting */
+.money-input { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.money-input-control { position: relative; display: block; }
+.money-input-control input { width: 100%; padding-inline-end: 58px; }
+.money-input-currency { position: absolute; inset-inline-end: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); font: 600 9px Inter, "Vazirmatn", sans-serif; letter-spacing: .04em; pointer-events: none; }
+.money-input-caption { color: var(--muted); font-size: 8px; line-height: 1.5; }
+
+/* Guided errors and toast actions */
+.run-error { align-items: flex-start; }
+.run-error > div { flex: 1; min-width: 0; }
+.run-error-item { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgb(237 194 114 / 18%); }
+.run-error-item:first-of-type { margin-top: 4px; padding-top: 0; border-top: 0; }
+.run-error-item p { margin: 0; color: var(--text-2); font-size: 10px; line-height: 1.7; }
+.run-error-item .run-error-hint { margin-top: 4px; color: var(--muted); }
+.run-error-item .button { margin-top: 8px; min-height: 30px; }
+.run-error .icon-button.tiny { flex: 0 0 auto; }
+.toast-action { margin-inline-start: 6px; padding: 5px 9px !important; border: 1px solid #3a5449 !important; border-radius: 7px; color: var(--teal) !important; background: #1a2b24 !important; font-size: 10px; font-weight: 600; white-space: nowrap; }
+.field-limit-note { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 8px; }
+.field-limit-note b { color: var(--text-2); font-weight: 600; }
+
+/* Wizard: four steps and the embedded team editor */
+.wizard { max-width: 1040px; }
+.wizard-steps { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.wizard-team .strategy-toolbar { margin-top: 10px; }
+.wizard-team .segmented-tabs { margin-top: 4px; }
+@media (max-width: 820px) { .wizard-steps { grid-template-columns: 1fr 1fr; } }
