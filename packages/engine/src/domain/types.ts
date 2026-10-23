@@ -141,6 +141,14 @@ export interface PortfolioState {
   observedAt: number;
 }
 
+/** Optional per-pair limits: a base quantity that is never sold, caps on one sell, and a buy budget. */
+export interface PairRiskLimit {
+  reservedBase?: string;
+  maxSellPct?: string;
+  maxSellQuantity?: string;
+  maxBuyNotional?: string;
+}
+
 export interface RiskLimits {
   maxOrderNotional: string;
   maxPositionNotional: string;
@@ -151,6 +159,8 @@ export interface RiskLimits {
   feeBufferBps: string;
   maxMarketSlippageBps: string;
   killSwitch: boolean;
+  /** Per-pair reserved holdings, sell caps, and buy budgets keyed by normalized symbol. */
+  pairLimits?: Record<string, PairRiskLimit>;
 }
 
 export interface RiskResult {

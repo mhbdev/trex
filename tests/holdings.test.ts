@@ -27,17 +27,19 @@ describe("pair holdings for agents", () => {
     expect(holdings.availableQuoteCash).toBe("2500000");
     expect(holdings.pairShareOfEquityPct).toBe("50.00");
     expect(holdings.otherPositions).toEqual([{ symbol: "USDTTMN", quantity: "10", valueInQuote: "1000000.00" }]);
-    expect(holdings.constraints.some((line) => line.includes("at most the available BTC quantity (0.015)"))).toBe(true);
+    expect(holdings.constraints.some((line) => line.includes("at most the sellable BTC quantity (0.015)"))).toBe(true);
+    expect(holdings.sellableNow).toBe("0.015");
+    expect(holdings.reservedBase).toBe("0");
     expect(holdings.constraints.some((line) => line.includes("SELL is impossible"))).toBe(false);
   });
 
   test("tells the agents when a side is impossible with the current balances", () => {
     const noBase = describePairHoldings("ETHTMN", portfolio);
     expect(noBase.availableBase).toBe("0");
-    expect(noBase.constraints.some((line) => line.includes("no ETH available to sell, so SELL is impossible"))).toBe(true);
+    expect(noBase.constraints.some((line) => line.includes("Nothing of ETH can be sold right now, so SELL is impossible"))).toBe(true);
 
     const noCash = describePairHoldings("BTCTMN", { ...portfolio, cash: "0" });
-    expect(noCash.constraints.some((line) => line.includes("no available TMN cash, so BUY is impossible"))).toBe(true);
+    expect(noCash.constraints.some((line) => line.includes("no available TMN to buy with, so BUY is impossible"))).toBe(true);
   });
 
   test("treats a missing position as zero holdings rather than failing", () => {
